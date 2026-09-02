@@ -1,4 +1,4 @@
-# BifProtect Testeur V3.2 — SIREN
+# BifProtect Testeur V3.3 — SIREN
 
 ## Objet
 Prototype de qualification d'une entreprise et de son site marchand à partir du **SIREN**.
@@ -16,11 +16,15 @@ Les sous-domaines officiels sont acceptés uniquement lorsqu'ils appartiennent a
 
 ## Décision
 - Blocage juridique : `NON ÉLIGIBLE`.
-- Contrôle complémentaire : `ÉLIGIBLE SOUS RÉSERVE`, souscription possible mais validation définitive en attente du justificatif.
-- Aucun blocage ni complémentaire et score >= 80 : `ÉLIGIBLE`.
+- Score < 60 : `CONTRÔLE COMPLÉMENTAIRE`.
+- Score 60–79 : `SURVEILLANCE RENFORCÉE`.
+- Score >= 80 avec complément documentaire : `ÉLIGIBLE SOUS RÉSERVE`.
+- Score >= 80 sans complément : `ÉLIGIBLE`.
+
+Un accès automatisé protégé n'est pas assimilé à une indisponibilité du site : les contrôles HTTP non mesurables ne sont pas pénalisés.
 
 ## Affichage
-Seuls les contrôles non conformes, inconnus ou complémentaires sont affichés. Les contrôles conformes restent pris en compte dans le calcul mais sont masqués.
+La synthèse utilisateur n'affiche pas la liste brute des contrôles techniques. Elle présente le score, le statut de qualification, le nombre de sujets techniques à corriger et les éventuels compléments documentaires. Les contrôles conformes et les détails techniques restent utilisés par le moteur mais sont masqués de la synthèse.
 
 ## Déploiement Render
 - Build : `python -m compileall .`

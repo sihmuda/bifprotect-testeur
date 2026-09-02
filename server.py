@@ -383,6 +383,8 @@ def extract_site_evidence(url, siren, company_name):
             "mentions-legales", "mentions-legales/", "mentions_legales", "mentions_legales/",
             "legal-notice", "legal-notice/", "legal", "legal/", "cgv", "cgv/",
             "conditions-generales-de-vente", "conditions-generales-de-vente/", "contact",
+            "cgu", "cgu/", "dc/cgu", "dc/cgu/", "dc/cgv", "dc/cgv/",
+            "dc/cookies", "dc/privacy", "dc/mentions-legales", "mentions-legales",
             "a-propos", "about", "resources/RWD/other/mentions_legales.pdf",
             "resources/imagesok/cgv/ml.pdf", "mentions_legales.pdf", "mentions-legales.pdf",
             "legal-notice.pdf"
@@ -591,6 +593,25 @@ SECURITY_HEADERS = [
 ]
 
 
+BOT_PROTECTION_MARKERS = (
+    "cf-chl", "cloudflare", "just a moment", "checking your browser",
+    "verify you are human", "verify you are a human", "captcha",
+    "recaptcha", "hcaptcha", "access denied", "automated access",
+    "bot detection", "bot protection", "enable javascript and cookies",
+    "checking if the site connection is secure", "perimeterx", "datadome",
+    "incapsula", "akamai bot", "security check"
+)
+
+def _looks_like_bot_protection(status_code, headers, body):
+    text = normalize_text(body)[:300_000]
+    server = normalize_text(headers.get("Server", ""))
+    powered = normalize_text(headers.get("X-Powered-By", ""))
+    combined = " ".join((text, server, powered))
+    if status_code in (403, 429):
+        return True
+    return any(marker in combined for marker in BOT_PROTECTION_MARKERS)
+
+
 def http_probe(url):
     result = {
         "reachable": False,
@@ -600,19 +621,42 @@ def http_probe(url):
         "security_headers": {},
         "server": None,
         "error": None,
+        "automated_access_blocked": False,
+        "technical_measurement": "UNKNOWN",
     }
     try:
-        with open_safe(url, "GET") as response:
+        with open_safe(url,"GET") as response:
+            raw = response.read(MAX_PAGE_BYTES)
             result["reachable"] = True
             result["status_code"] = response.status
             result["final_url"] = response.geturl()
             result["server"] = response.headers.get("Server")
+            if _looks_like_bot_protection(response.status, response.headers, raw.decode("utf-8", errors="ignore")):
+                result["automated_access_blocked"] = True
+                result["technical_measurement"] = "BLOCKED"
+                return result
             for header in SECURITY_HEADERS:
                 value = response.headers.get(header)
                 if value:
                     result["security_headers"][header.lower()] = value
+            result["technical_measurement"] = "MEASURED"
+    except urllib.error.HTTPError as exc:
+        body = b""
+        try:
+            body = exc.read(MAX_PAGE_BYTES)
+        except Exception:
+            pass
+        result["status_code"] = exc.code
+        result["server"] = exc.headers.get("Server") if exc.headers else None
+        result["error"] = str(exc)
+        if _looks_like_bot_protection(exc.code, exc.headers or {}, body.decode("utf-8", errors="ignore")):
+            result["automated_access_blocked"] = True
+            result["technical_measurement"] = "BLOCKED"
+        else:
+            result["technical_measurement"] = "ERROR"
     except Exception as exc:
         result["error"] = str(exc)
+        result["technical_measurement"] = "ERROR"
     return result
 
 
@@ -649,10 +693,7 @@ def calculate_score(company, legal, domain_link, dns, http, tls):
     blockers = []
     complementary = []
 
-    # Garde-fou juridique principal : BifProtect identifie désormais l'entreprise par SIREN.
-    # Aucun établissement précis n'est imposé à la souscription.
     if not company.get("found"):
-        score -= 20
         blockers.append("SIREN non retrouvé dans la source publique interrogée.")
     elif company.get("etat") == "F":
         blockers.append("L'entreprise est déclarée cessée.")
@@ -674,45 +715,63 @@ def calculate_score(company, legal, domain_link, dns, http, tls):
     if domain_link.get("status") != "VERIFIED":
         complementary.append("Le lien entre le domaine et le SIREN n'est pas établi par une preuve juridique directe : justificatif requis avant validation définitive.")
 
+    # Un signal non mesurable ne doit jamais être traité comme une non-conformité.
     if not dns.get("ipv4"):
         score -= 20
-        reasons.append("Aucune adresse IPv4 publique résolue.")
-    if not http.get("reachable"):
+        reasons.append("DNS / IPv4 non résolu")
+
+    access_blocked = bool(http.get("automated_access_blocked"))
+    http_measured = http.get("technical_measurement") == "MEASURED"
+
+    if not http.get("reachable") and not access_blocked:
         score -= 25
-        reasons.append("Site non accessible.")
+        reasons.append("Site non accessible")
+
     if not tls.get("valid"):
         score -= 20
-        reasons.append("Certificat TLS non validé.")
+        reasons.append("Certificat TLS non validé")
 
-    for header, penalty, reason in [
-        ("strict-transport-security", 8, "HSTS absent"),
-        ("content-security-policy", 8, "CSP absente"),
-        ("x-content-type-options", 4, "X-Content-Type-Options absent"),
-        ("x-frame-options", 4, "X-Frame-Options absent"),
-    ]:
-        if header not in http.get("security_headers", {}):
-            score -= penalty
-            reasons.append(reason)
+    if http_measured:
+        for header, penalty, reason in [
+            ("strict-transport-security", 8, "HSTS absent"),
+            ("content-security-policy", 8, "CSP absente"),
+            ("x-content-type-options", 4, "X-Content-Type-Options absent"),
+            ("x-frame-options", 4, "X-Frame-Options absent"),
+        ]:
+            if header not in http.get("security_headers", {}):
+                score -= penalty
+                reasons.append(reason)
+    elif access_blocked:
+        complementary.append("L'accès automatisé au site est protégé ; les en-têtes HTTP n'ont pas pu être mesurés depuis notre point de contrôle.")
+    else:
+        complementary.append("Les contrôles HTTP n'ont pas pu être mesurés.")
 
-    score = max(0, min(100, score))
+    technical_score_available = not access_blocked
+    score = max(0, min(100, score)) if technical_score_available else None
+    technical_issue_count = len(reasons)
+    technical_unknown_count = 1 if access_blocked else 0
 
-    # Règle métier demandée : le complémentaire n'empêche pas la souscription.
-    # Il empêche uniquement la validation définitive tant que le justificatif n'est pas fourni.
+    # Les blocages juridiques priment. Une mesure technique incomplète ne doit
+    # jamais être transformée en score artificiel : elle déclenche un contrôle
+    # complémentaire sans être assimilée à une défaillance du site.
     if blockers:
         decision = "NON_ELIGIBLE"
         decision_label = "NON ÉLIGIBLE"
+    elif not technical_score_available:
+        decision = "CONTROLE_COMPLEMENTAIRE"
+        decision_label = "CONTRÔLE COMPLÉMENTAIRE"
+    elif score < 60:
+        decision = "CONTROLE_COMPLEMENTAIRE"
+        decision_label = "CONTRÔLE COMPLÉMENTAIRE"
+    elif score < 80:
+        decision = "SURVEILLANCE_RENFORCEE"
+        decision_label = "SURVEILLANCE RENFORCÉE"
     elif complementary:
         decision = "ELIGIBLE_SOUS_RESERVE"
         decision_label = "ÉLIGIBLE SOUS RÉSERVE"
-    elif score >= 80:
+    else:
         decision = "ELIGIBLE"
         decision_label = "ÉLIGIBLE"
-    elif score >= 60:
-        decision = "SURVEILLANCE_RENFORCEE"
-        decision_label = "SURVEILLANCE RENFORCÉE"
-    else:
-        decision = "CONTROLE_COMPLEMENTAIRE"
-        decision_label = "CONTRÔLE COMPLÉMENTAIRE"
 
     reasons.extend(complementary)
     return {
@@ -725,7 +784,12 @@ def calculate_score(company, legal, domain_link, dns, http, tls):
         "blockers": blockers,
         "complementary": complementary,
         "reasons": reasons,
-        "version_bareme": "3.2",
+        "technical_issue_count": technical_issue_count,
+        "technical_unknown_count": technical_unknown_count,
+        "automated_access_blocked": access_blocked,
+        "technical_measurement": "PARTIAL" if access_blocked else ("MEASURED" if http_measured else "LIMITED"),
+        "technical_score_available": technical_score_available,
+        "version_bareme": "3.3",
     }
 
 
@@ -740,7 +804,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/health":
-            self.send_json({"status": "ok", "version": "3.2"})
+            self.send_json({"status": "ok", "version": "3.3"})
             return
         if self.path in ("/", "/index.html"):
             body = (Path("static") / "index.html").read_bytes()
@@ -794,5 +858,5 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    print(f"BifProtect Testeur V3.2 — écoute sur {HOST}:{PORT}")
+    print(f"BifProtect Testeur V3.3 — écoute sur {HOST}:{PORT}")
     ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()
