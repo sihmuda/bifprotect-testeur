@@ -2,7 +2,7 @@
 <html lang="fr">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>BifProtect — Testeur V2.6</title>
+<title>BifProtect — Testeur V2.8</title>
 <style>
 :root{--bg:#07111f;--card:#0d1b2d;--line:#223751;--text:#eef5ff;--muted:#91a4bd;--a:#35d0ba;--w:#ffc857;--d:#ff6b6b;--b:#63a8ff}
 *{box-sizing:border-box}body{margin:0;background:linear-gradient(145deg,#07111f,#0a1728);color:var(--text);font-family:Inter,system-ui,sans-serif}
@@ -14,8 +14,8 @@ table{width:100%;border-collapse:collapse;margin-top:15px}td,th{padding:11px 7px
 .section-title{margin:28px 0 8px;font-size:17px}.decision-box{padding:15px;border-radius:12px;background:#081522;margin-top:15px}.small{font-size:11px;color:var(--muted)}
 </style></head>
 <body><main>
-<div class="brand">BifProtect by Grisbiz</div><div class="sub">Testeur de qualification entreprise · domaine · sécurité — V2.6</div>
-<section class="card"><div class="grid"><div><label for="siret">SIRET</label><input id="siret" maxlength="14" inputmode="numeric" placeholder="14 chiffres"></div><div><label for="site">Site marchand</label><input id="site" placeholder="https://www.exemple.fr"></div></div><button id="go">Lancer le contrôle</button><div id="msg" class="note"></div></section>
+<div class="brand">BifProtect by Grisbiz</div><div class="sub">Testeur de qualification entreprise · domaine · sécurité — V2.8</div>
+<section class="card"><div class="grid"><div><label for="siren">SIREN</label><input id="siren" maxlength="9" inputmode="numeric" placeholder="9 chiffres"></div><div><label for="site">Site marchand</label><input id="site" placeholder="https://www.exemple.fr"></div></div><button id="go">Lancer le contrôle</button><div id="msg" class="note"></div></section>
 <section id="result" class="card hidden"></section></main>
 <script>
 const $=x=>document.getElementById(x);const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#039;"}[c]));
@@ -24,14 +24,12 @@ function badge(d){if(d==="ELIGIBLE")return'<span class="badge ok">ÉLIGIBLE</spa
 function statusLabel(s){return s==="VERIFIED"?'<span class="ok">Vérifié</span>':s==="PROBABLE"?'<span class="warn">Probable</span>':'<span class="bad">Non établi</span>'}
 function legalText(l){if(!l.available)return"Non vérifiable automatiquement";return l.radiation?"Radiation signalée":l.liquidation?"Liquidation judiciaire signalée":l.redressement?"Redressement judiciaire signalé":l.sauvegarde?"Sauvegarde signalée":"Aucune alerte BODACC détectée"}
 
-$("go").onclick=async()=>{const s=$("siret").value.trim(),site=$("site").value.trim();if(!/^\d{14}$/.test(s)){alert("SIRET invalide : 14 chiffres.");return}if(!/^https:\/\//i.test(site)){alert("L'URL doit commencer par https://");return}
+$("go").onclick=async()=>{const s=$("siren").value.trim(),site=$("site").value.trim();if(!/^\d{9}$/.test(s)){alert("SIREN invalide : 9 chiffres.");return}if(!/^https:\/\//i.test(site)){alert("L'URL doit commencer par https://");return}
 $("go").disabled=true;$("msg").textContent="Vérification entreprise, statut juridique, rattachement du domaine et sécurité…";$("result").classList.add("hidden");
-try{const r=await fetch("/api/check",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({siret:s,site})});const d=await r.json();if(!r.ok)throw Error(d.detail||"Erreur");const c=d.controls,x=d.decision,i=d.identity,l=d.legal,dl=d.domain_link;
+try{const r=await fetch("/api/check",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({siren:s,site})});const d=await r.json();if(!r.ok)throw Error(d.detail||"Erreur");const c=d.controls,x=d.decision,i=d.identity,l=d.legal,dl=d.domain_link;
 const identityRows=[
-["SIRET / entreprise",i.nom||"Non retrouvée",i.found],
+["SIREN / entreprise",i.nom||"Non retrouvée",i.found],
 ["Entreprise active",i.etat==="A"?"Oui":(i.etat==="F"?"Cessée":"À vérifier"),i.etat==="A"],
-["Établissement correspondant",i.establishment_match?"SIRET confirmé":"Non confirmé",i.establishment_match],
-["Établissement actif",i.establishment_state==="A"?"Oui":(i.establishment_state==="F"?"Fermé":"À vérifier"),i.establishment_state==="A"?true:(i.establishment_state==="F"?false:null)],
 ["Radiation",l.available?(l.radiation?"Signalée":"Aucune détectée"):"À vérifier",l.available?!l.radiation:null],
 ["Procédure collective",legalText(l),l.available?(!l.liquidation&&!l.redressement&&!l.sauvegarde):null]
 ];
@@ -42,7 +40,7 @@ $("result").innerHTML=`<div class="scorebox"><div class="score">${x.score}</div>
 <div class="decision-box"><strong>${x.can_subscribe?"Souscription possible":"Souscription impossible"}</strong><div class="note">${reserve?"Le contrôle complémentaire n'empêche pas la souscription. Un justificatif du lien entre l'entreprise et le domaine devra être fourni avant validation définitive.":x.final_validation?"Aucun justificatif complémentaire n'est requis par ce contrôle.":"Une condition bloquante empêche la souscription."}</div></div>
 ${issueTable("1. Identité & statut juridique",identityRows)}
 ${dl.status!=="VERIFIED"?`<h3 class="section-title">Rattachement du domaine — point à traiter</h3><table><tr><th>Contrôle</th><th>Résultat</th><th>État</th></tr><tr><td>Entreprise ↔ domaine</td><td>${esc(dl.label)}</td><td>${statusLabel(dl.status)}</td></tr></table>`:""}
-${reserve?`<div class="decision-box"><strong>📄 Justificatif à fournir</strong><div class="note">Document établissant le lien entre l'entreprise identifiée par le SIRET et le domaine exploité. Exemples : attestation signée du représentant légal, document contractuel d'exploitation du domaine, ou tout justificatif équivalent permettant d'établir ce lien.</div></div>`:''}
+${reserve?`<div class="decision-box"><strong>📄 Justificatif à fournir</strong><div class="note">Document établissant le lien entre l'entreprise identifiée par le SIREN et le domaine exploité. Exemples : attestation signée du représentant légal, document contractuel d'exploitation du domaine, ou tout justificatif équivalent permettant d'établir ce lien.</div></div>`:''}
 ${issueTable("3. Sécurité technique",techRows)}
 <p class="small">Barème ${esc(x.version_bareme)} · Seuls les contrôles non conformes, à vérifier ou complémentaires sont affichés · Contrôle non intrusif.</p>`;
 $("result").classList.remove("hidden");$("msg").textContent="Contrôle terminé.";
