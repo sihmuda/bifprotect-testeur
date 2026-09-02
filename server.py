@@ -529,6 +529,79 @@ def extract_site_evidence(url, siren, company_name):
     except Exception as exc:
         result["error"]=str(exc); result["status"]="UNKNOWN"; result["label"]="Contrôle complémentaire requis"; return result
 
+
+# --- DNS / HTTP / TLS ---
+
+def dns_probe(hostname):
+    try:
+        ips = public_ips(hostname)
+        ipv4 = [x for x in ips if ":" not in x]
+        ipv6 = [x for x in ips if ":" in x]
+        return {"ipv4": ipv4, "ipv6": ipv6, "error": None}
+    except Exception as exc:
+        return {"ipv4": [], "ipv6": [], "error": str(exc)}
+
+
+SECURITY_HEADERS = [
+    "Strict-Transport-Security",
+    "Content-Security-Policy",
+    "X-Content-Type-Options",
+    "X-Frame-Options",
+    "Referrer-Policy",
+    "Permissions-Policy",
+]
+
+
+def http_probe(url):
+    result = {
+        "reachable": False,
+        "status_code": None,
+        "https": True,
+        "final_url": None,
+        "security_headers": {},
+        "server": None,
+        "error": None,
+    }
+    try:
+        with open_safe(url, "GET") as response:
+            result["reachable"] = True
+            result["status_code"] = response.status
+            result["final_url"] = response.geturl()
+            result["server"] = response.headers.get("Server")
+            for header in SECURITY_HEADERS:
+                value = response.headers.get(header)
+                if value:
+                    result["security_headers"][header.lower()] = value
+    except Exception as exc:
+        result["error"] = str(exc)
+    return result
+
+
+def tls_probe(hostname):
+    result = {
+        "valid": False,
+        "subject": None,
+        "issuer": None,
+        "tls_version": None,
+        "error": None,
+    }
+    try:
+        context = ssl.create_default_context()
+        with socket.create_connection((hostname, 443), timeout=TIMEOUT) as raw:
+            with context.wrap_socket(raw, server_hostname=hostname) as tls_socket:
+                cert = tls_socket.getpeercert()
+                subject = dict(x[0] for x in cert.get("subject", []))
+                issuer = dict(x[0] for x in cert.get("issuer", []))
+                result.update(
+                    valid=True,
+                    subject=subject.get("commonName"),
+                    issuer=issuer.get("commonName"),
+                    tls_version=tls_socket.version(),
+                )
+    except Exception as exc:
+        result["error"] = str(exc)
+    return result
+
 # --- Barème / décision ---
 
 def calculate_score(company, legal, domain_link, dns, http, tls):
@@ -613,7 +686,7 @@ def calculate_score(company, legal, domain_link, dns, http, tls):
         "blockers": blockers,
         "complementary": complementary,
         "reasons": reasons,
-        "version_bareme": "3.0",
+        "version_bareme": "3.1",
     }
 
 
@@ -628,7 +701,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/health":
-            self.send_json({"status": "ok", "version": "3.0"})
+            self.send_json({"status": "ok", "version": "3.1"})
             return
         if self.path in ("/", "/index.html"):
             body = (Path("static") / "index.html").read_bytes()
@@ -678,5 +751,5 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    print(f"BifProtect Testeur V3.0 — écoute sur {HOST}:{PORT}")
+    print(f"BifProtect Testeur V3.1 — écoute sur {HOST}:{PORT}")
     ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()
