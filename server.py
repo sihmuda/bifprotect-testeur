@@ -17,7 +17,7 @@ from urllib.parse import quote, urljoin, urlparse
 
 HOST = "0.0.0.0"
 PORT = int(os.environ.get("PORT", "10000"))
-TIMEOUT = 5
+TIMEOUT = 4
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36 BifProtect/3.7"
 
 SEARCH_API = "https://recherche-entreprises.api.gouv.fr/search?q="
@@ -362,13 +362,14 @@ def _contains_registration(raw, siren):
 
 
 def extract_site_evidence(url, siren, company_name):
-    """Établit le rattachement domaine ↔ SIREN avec preuve juridique directe.
+    """Établit rapidement le rattachement domaine ↔ entreprise.
 
-    La preuve doit venir du domaine organisationnel saisi, de www ou d'un
-    sous-domaine officiel de la même organisation. Pour un sous-domaine, on
-    exige en plus que la page juridique mentionne le SIREN et fasse référence
-    au domaine principal (ou y renvoie). Cela évite de confondre deux sociétés
-    simplement parce qu'elles partagent un suffixe DNS.
+    La vérification publique doit rester non intrusive et surtout ne pas transformer
+    une absence de preuve en une exploration interminable. On privilégie :
+      1. la page d'accueil ;
+      2. les principales pages légales du même hôte / www ;
+      3. les liens légaux explicitement découverts dans l'accueil.
+    Les sous-domaines arbitraires et le sitemap ne sont plus explorés automatiquement.
     """
     result = {"status":"UNKNOWN","label":"Non déterminé","direct_proof":False,
               "score":0,"pages_checked":[],"evidence":[],"error":None}
@@ -376,35 +377,16 @@ def extract_site_evidence(url, siren, company_name):
         base = validate_site_url(url)
         base_org = organizational_domain(base.hostname)
         base_host = base.hostname.lower().strip(".")
-        root = f"https://{base_org}"
         legal_terms = ("mentions", "mention-legale", "mentions-legales", "legal", "legal-notice",
                        "cgv", "conditions", "terms", "impressum", "qui-sommes", "a-propos",
                        "about", "rgpd", "privacy", "confidentialite", "cookies", "company")
         direct_paths = [
-            "mentions-legales", "mentions-legales/", "mentions_legales", "mentions_legales/",
-            "legal-notice", "legal-notice/", "legal", "legal/", "cgv", "cgv/",
-            "conditions-generales-de-vente", "conditions-generales-de-vente/", "contact",
-            "cgu", "cgu/", "dc/cgu", "dc/cgu/", "dc/cgv", "dc/cgv/",
-            "dc/cookies", "dc/privacy", "dc/mentions-legales", "mentions-legales",
-            "a-propos", "about", "resources/RWD/other/mentions_legales.pdf",
-            "resources/imagesok/cgv/ml.pdf", "mentions_legales.pdf", "mentions-legales.pdf",
-            "legal-notice.pdf"
+            "mentions-legales", "mentions_legales", "legal-notice", "legal", "cgv",
+            "conditions-generales-de-vente", "cgu", "dc/cgu", "dc/cgv", "dc/cookies",
+            "dc/privacy", "dc/mentions-legales", "a-propos", "about",
+            "resources/RWD/other/mentions_legales.pdf", "mentions_legales.pdf", "mentions-legales.pdf"
         ]
         seen=set(); discovered=[]; combined=[]
-
-        # Hôtes candidats : hôte saisi, www, puis quelques sous-domaines juridiques
-        # courants. Ils restent strictement dans le même domaine organisationnel.
-        prefixes=[base_host.split('.')[0]] if base_host else []
-        if base_org not in prefixes: prefixes += ["www"]
-        prefixes += ["marketplace","corporate","legal","company","about","business","pro","shop","store","support"]
-        candidate_hosts=[]
-        for prefix in prefixes:
-            h = base_org if prefix == base_org else (prefix + "." + base_org)
-            if h not in candidate_hosts and same_organizational_domain(h, base_org):
-                candidate_hosts.append(h)
-        if base_host not in candidate_hosts:
-            candidate_hosts.insert(0, base_host)
-        candidate_hosts = candidate_hosts[:12]
 
         def allowed(candidate):
             try:
@@ -414,16 +396,15 @@ def extract_site_evidence(url, siren, company_name):
                 return False
 
         def add_candidate(candidate, force=False):
-            if not candidate: return
+            if not candidate or not allowed(candidate): return
             try:
-                p=urlparse(candidate)
-                if not allowed(candidate): return
-                low=candidate.lower(); path_low=p.path.lower()
-                is_pdf=path_low.endswith('.pdf') or '.pdf?' in low
+                low=candidate.lower(); path_low=urlparse(candidate).path.lower()
+                is_pdf=path_low.endswith('.pdf')
                 is_legal=force or is_pdf or any(k in low for k in legal_terms)
                 if is_legal and candidate not in seen and candidate not in discovered:
                     discovered.append(candidate)
-            except Exception: return
+            except Exception:
+                return
 
         def parse_html(raw, final_url):
             parser=TextExtractor(); parser.feed(raw.decode('utf-8',errors='ignore'))
@@ -434,138 +415,103 @@ def extract_site_evidence(url, siren, company_name):
 
         def page_proves_base(text, final_url):
             if not text: return False
-            compact=normalize_text(text)
             host=(urlparse(final_url).hostname or "").lower().strip('.')
-            # Même hôte : une preuve SIREN sur une page juridique du domaine saisi est directe.
-            if host == base_host:
-                return True
-            # Sous-domaine officiel : on demande une référence au domaine principal.
+            if host == base_host: return True
             tokens={base_org, "www."+base_org, base_host}
-            return any(t in compact for t in tokens)
+            return any(t in normalize_text(text) for t in tokens)
 
         def page_proves_company_role(text, final_url):
-            """Preuve juridique par identification nominative de l'entreprise.
-
-            Le SIREN n'a pas besoin d'être imprimé dans le document : une page juridique
-            du domaine peut identifier explicitement l'entreprise comme exploitant, vendeur,
-            éditeur, responsable du traitement ou propriétaire. Le nom est ensuite rapproché
-            de l'unité légale déjà vérifiée par le SIREN.
-            """
-            if not text or not company_name:
-                return False
+            if not text or not company_name: return False
             host=(urlparse(final_url).hostname or "").lower().strip('.')
-            if not same_organizational_domain(host, base_org):
-                return False
+            if not same_organizational_domain(host, base_org): return False
             normalized_text=normalize_text(text)
             company_tokens=name_tokens(company_name)
-            # On exige au moins deux tokens significatifs, sauf raison sociale courte.
             if len(company_tokens) >= 2:
                 name_hit=sum(1 for t in company_tokens if t in normalized_text) >= 2
             else:
                 name_hit=bool(company_tokens) and next(iter(company_tokens)) in normalized_text
-            if not name_hit:
-                return False
+            if not name_hit: return False
             role_terms=(
                 "exploitant", "vendeur", "editeur", "éditeur", "responsable du traitement",
                 "proprietaire", "propriétaire", "societe", "société", "site marchand",
                 "conditions de vente", "conditions generales de vente", "conditions générales de vente",
-                "propriete intellectuelle", "propriété intellectuelle", "est et reste la propriete",
-                "est et reste la propriété", "agissant pour le compte de", "responsable de traitement"
+                "propriete intellectuelle", "propriété intellectuelle", "agissant pour le compte de",
+                "responsable de traitement"
             )
             return any(term in normalized_text for term in role_terms)
 
         def check_candidate(candidate):
-            if candidate in seen or not allowed(candidate): return
+            if candidate in seen or not allowed(candidate): return False
             seen.add(candidate)
             try:
                 with open_safe(candidate,"GET") as response:
                     final_url=response.geturl()
-                    if not allowed(final_url): return
+                    if not allowed(final_url): return False
                     ctype=(response.headers.get("Content-Type") or "").lower()
-                    raw=response.read(1_200_000)
+                    raw=response.read(800_000)
                     result["pages_checked"].append(final_url)
                     proof=_contains_registration(raw,siren)
                     page_text=""
-                    if not ctype.startswith("application/pdf") and not final_url.lower().split('?',1)[0].endswith('.pdf'):
+                    is_pdf=ctype.startswith("application/pdf") or final_url.lower().split('?',1)[0].endswith('.pdf')
+                    if not is_pdf:
                         parser=TextExtractor(); parser.feed(raw.decode('utf-8',errors='ignore'))
                         page_text=" ".join(parser.parts)
                     if proof:
-                        if ctype.startswith("application/pdf") or final_url.lower().split('?',1)[0].endswith('.pdf'):
-                            proof_ok=True
-                        else:
-                            proof_ok=page_proves_base(page_text, final_url)
-                        if proof_ok:
+                        if is_pdf or page_proves_base(page_text, final_url):
                             result["direct_proof"]=True; result["score"]=100
                             result["evidence"].append(f"{proof} retrouvé sur {final_url}")
-                            return
-                    # Une preuve juridique nominative est suffisante même si le SIREN
-                    # n'apparaît pas dans le document : le SIREN a déjà identifié l'unité légale.
+                            return True
                     if page_text and page_proves_company_role(page_text, final_url):
                         result["direct_proof"]=True; result["score"]=100
                         result["evidence"].append(f"Entreprise identifiée juridiquement sur {final_url}")
-                        return
-                    if "html" in ctype or final_url.lower().split('?',1)[0].endswith(('.html','.htm','/')):
+                        return True
+                    if not is_pdf:
                         parse_html(raw,final_url)
-            except Exception as exc:
-                # Les erreurs individuelles ne doivent pas faire échouer toute la qualification.
-                return
+            except Exception:
+                return False
+            return False
 
-        # 1) URLs prioritaires sur l'hôte saisi et www : exécution parallèle.
-        priority_candidates=[]
-        for host in candidate_hosts[:2]:
-            for path in ["", *direct_paths]:
-                candidate = f"https://{host}/" if not path else f"https://{host}/{path.lstrip('/') }"
-                if candidate not in priority_candidates:
-                    priority_candidates.append(candidate)
-        with ThreadPoolExecutor(max_workers=8) as pool:
-            futures=[pool.submit(check_candidate, c) for c in priority_candidates]
+        # Accueil d'abord : une seule requête permet de détecter rapidement une preuve
+        # et de découvrir les véritables liens légaux du site.
+        home_candidates=[f"https://{base_host}/"]
+        if base_host != "www."+base_org and base_host != base_org:
+            home_candidates.append(f"https://www.{base_org}/")
+        elif base_host == base_org:
+            home_candidates.append(f"https://www.{base_org}/")
+
+        with ThreadPoolExecutor(max_workers=min(2,len(home_candidates))) as pool:
+            futures=[pool.submit(check_candidate,c) for c in home_candidates]
             for future in as_completed(futures):
-                try: future.result()
+                try:
+                    if future.result() and result["direct_proof"]: break
                 except Exception: pass
 
-        # 2) Quelques sous-domaines juridiques évidents en second recours.
         if not result["direct_proof"]:
-            fallback_candidates=[]
-            for host in candidate_hosts[2:6]:
-                for path in direct_paths[:8]:
-                    fallback_candidates.append(f"https://{host}/{path}")
-            with ThreadPoolExecutor(max_workers=8) as pool:
-                futures=[pool.submit(check_candidate, c) for c in fallback_candidates]
+            # Pages légales prioritaires, uniquement sur le domaine saisi et www.
+            priority=[]
+            hosts=[base_host]
+            www=f"www.{base_org}"
+            if www not in hosts: hosts.append(www)
+            for host in hosts:
+                for path in direct_paths:
+                    candidate=f"https://{host}/{path}"
+                    if candidate not in priority: priority.append(candidate)
+
+            with ThreadPoolExecutor(max_workers=12) as pool:
+                futures=[pool.submit(check_candidate,c) for c in priority]
+                for future in as_completed(futures):
+                    try:
+                        future.result()
+                    except Exception: pass
+
+        if not result["direct_proof"] and discovered:
+            # Seulement les liens légaux réellement découverts sur l'accueil / pages déjà lues.
+            candidates=list(dict.fromkeys(discovered))[:20]
+            with ThreadPoolExecutor(max_workers=10) as pool:
+                futures=[pool.submit(check_candidate,c) for c in candidates]
                 for future in as_completed(futures):
                     try: future.result()
                     except Exception: pass
-
-        # 3) Pages légales/PDF découvertes dans le HTML.
-        if not result["direct_proof"]:
-            candidates=list(dict.fromkeys(discovered[:50]))
-            with ThreadPoolExecutor(max_workers=8) as pool:
-                futures=[pool.submit(check_candidate, c) for c in candidates]
-                for future in as_completed(futures):
-                    try: future.result()
-                    except Exception: pass
-
-        # 4) Sitemap uniquement en dernier recours.
-        if not result["direct_proof"]:
-            sitemap_urls=[f"https://{h}/sitemap.xml" for h in candidate_hosts[:2]]
-            for sm in sitemap_urls:
-                try:
-                    if not allowed(sm): continue
-                    with open_safe(sm,"GET") as response:
-                        raw=response.read(1_000_000); xml=raw.decode('utf-8',errors='ignore')
-                        for loc in re.findall(r"<loc>\s*(.*?)\s*</loc>",xml,flags=re.I|re.S):
-                            loc=html.unescape(loc.strip())
-                            if allowed(loc):
-                                low=loc.lower()
-                                if any(k in low for k in legal_terms) or low.endswith('.pdf'):
-                                    add_candidate(loc,force=True)
-                except Exception: continue
-            if not result["direct_proof"]:
-                candidates=list(dict.fromkeys(discovered[:50]))
-                with ThreadPoolExecutor(max_workers=8) as pool:
-                    futures=[pool.submit(check_candidate, c) for c in candidates]
-                    for future in as_completed(futures):
-                        try: future.result()
-                        except Exception: pass
 
         corpus=normalize_text(" ".join(combined))
         domain_tokens=name_tokens(base_org.split('.')[0])
@@ -588,7 +534,6 @@ def extract_site_evidence(url, siren, company_name):
         return result
     except Exception as exc:
         result["error"]=str(exc); result["status"]="UNKNOWN"; result["label"]="Contrôle complémentaire requis"; return result
-
 
 # --- DNS / HTTP / TLS ---
 

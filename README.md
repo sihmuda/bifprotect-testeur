@@ -1,4 +1,4 @@
-# BifProtect Testeur V3.7 — SIREN
+# BifProtect Testeur V3.8 — SIREN
 
 ## Objet
 Prototype de qualification d'une entreprise et de son site marchand à partir du **SIREN**.
@@ -30,3 +30,6 @@ La synthèse utilisateur n'affiche pas la liste brute des contrôles techniques.
 - Build : `python -m compileall .`
 - Start : `python server.py`
 - Health : `/health`
+
+
+Optimisation V3.8 : vérification du rattachement domaine plus ciblée et parallélisée, sans exploration automatique des sous-domaines arbitraires ni sitemap.
