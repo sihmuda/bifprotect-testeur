@@ -555,7 +555,7 @@ def calculate_score(company, legal, domain_link, dns, http, tls):
         "blockers": blockers,
         "complementary": complementary,
         "reasons": reasons,
-        "version_bareme": "2.2",
+        "version_bareme": "2.4",
     }
 
 
