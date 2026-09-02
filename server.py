@@ -16,10 +16,10 @@ from urllib.parse import quote, urljoin, urlparse
 HOST = "0.0.0.0"
 PORT = int(os.environ.get("PORT", "10000"))
 TIMEOUT = 10
-USER_AGENT = "BifProtect-Testeur/2.5"
+USER_AGENT = "BifProtect-Testeur/2.6"
 
 SEARCH_API = "https://recherche-entreprises.api.gouv.fr/search?q="
-BODACC_API = "https://bodacc-datadila.opendatasoft.com/api/explore/v2.5/catalog/datasets/annonces-commerciales/records"
+BODACC_API = "https://bodacc-datadila.opendatasoft.com/api/explore/v2.1/catalog/datasets/annonces-commerciales/records"
 
 # --- Sécurité réseau : pas de proxy vers des réseaux privés ---
 
@@ -331,7 +331,30 @@ class TextExtractor(HTMLParser):
                 self.title += " " + text
 
 
+def _contains_registration(raw, siren, siret):
+    """Détecte un SIREN/SIRET avec ou sans espaces, dans HTML/PDF/texte brut."""
+    if not raw:
+        return None
+    text = raw.decode("latin-1", errors="ignore") if isinstance(raw, (bytes, bytearray)) else str(raw)
+    if siret:
+        compact = re.sub(r"\D", "", text)
+        if siret in compact:
+            return f"SIRET {siret}"
+        pat = r"\b" + r"\D*".join(map(re.escape, [siret[i:i+3] for i in range(0, 14, 3)])) + r"\b"
+        if re.search(pat, text):
+            return f"SIRET {siret}"
+    if siren:
+        compact = re.sub(r"\D", "", text)
+        if siren in compact:
+            return f"SIREN {siren}"
+        pat = r"\b" + r"\D*".join(map(re.escape, [siren[i:i+3] for i in range(0, 9, 3)])) + r"\b"
+        if re.search(pat, text):
+            return f"SIREN {siren}"
+    return None
+
+
 def extract_site_evidence(url, siren, siret, company_name):
+    """Évalue le lien domaine ↔ entreprise, en recherchant aussi les pages légales découvertes dans le site."""
     result = {
         "status": "UNKNOWN",
         "label": "Non déterminé",
@@ -355,30 +378,71 @@ def extract_site_evidence(url, siren, siret, company_name):
         ]
         seen = set()
         combined = []
-        for candidate in candidates:
+        discovered = []
+
+        def add_candidate(candidate):
+            if not candidate:
+                return
+            p = urlparse(candidate)
+            if p.netloc != base.netloc:
+                return
+            # Ne suivre automatiquement que des liens légaux/institutionnels du même domaine.
+            low = candidate.lower()
+            if any(k in low for k in ("mentions", "legal", "cgv", "conditions", "terms", "impressum", "qui-sommes", "a-propos")):
+                discovered.append(candidate)
+
+        # Première passe : pages connues + liens légaux présents sur la page d'accueil.
+        initial = list(candidates)
+        for candidate in initial:
             p = urlparse(candidate)
             if p.netloc != base.netloc or candidate in seen:
                 continue
             seen.add(candidate)
             try:
                 with open_safe(candidate, "GET") as response:
+                    final_url = response.geturl()
                     content_type = (response.headers.get("Content-Type") or "").lower()
-                    if "text/html" not in content_type and candidate != url:
-                        continue
-                    raw = response.read(700_000).decode("utf-8", errors="ignore")
-                    parser = TextExtractor()
-                    parser.feed(raw)
-                    text = normalize_text(" ".join(parser.parts))
-                    combined.append(text)
-                    result["pages_checked"].append(response.geturl())
-                    if siren and siren in re.sub(r"\D", "", raw):
+                    raw = response.read(900_000)
+                    result["pages_checked"].append(final_url)
+                    proof = _contains_registration(raw, siren, siret)
+                    if proof:
                         result["direct_proof"] = True
-                        result["score"] = max(result["score"], 100)
-                        result["evidence"].append(f"SIREN {siren} retrouvé sur {response.geturl()}")
-                    if siret and siret in re.sub(r"\D", "", raw):
+                        result["score"] = 100
+                        result["evidence"].append(f"{proof} retrouvé sur {final_url}")
+                    if "html" in content_type or candidate == url:
+                        parser = TextExtractor()
+                        parser.feed(raw.decode("utf-8", errors="ignore"))
+                        text = normalize_text(" ".join(parser.parts))
+                        combined.append(text)
+                        for href in parser.links:
+                            try:
+                                add_candidate(urljoin(final_url, href))
+                            except Exception:
+                                pass
+            except Exception:
+                continue
+
+        # Deuxième passe : suivre quelques pages légales réellement découvertes.
+        for candidate in discovered[:12]:
+            p = urlparse(candidate)
+            if p.netloc != base.netloc or candidate in seen:
+                continue
+            seen.add(candidate)
+            try:
+                with open_safe(candidate, "GET") as response:
+                    final_url = response.geturl()
+                    raw = response.read(900_000)
+                    result["pages_checked"].append(final_url)
+                    proof = _contains_registration(raw, siren, siret)
+                    if proof:
                         result["direct_proof"] = True
-                        result["score"] = max(result["score"], 100)
-                        result["evidence"].append(f"SIRET {siret} retrouvé sur {response.geturl()}")
+                        result["score"] = 100
+                        result["evidence"].append(f"{proof} retrouvé sur {final_url}")
+                    content_type = (response.headers.get("Content-Type") or "").lower()
+                    if "html" in content_type:
+                        parser = TextExtractor()
+                        parser.feed(raw.decode("utf-8", errors="ignore"))
+                        combined.append(normalize_text(" ".join(parser.parts)))
             except Exception:
                 continue
 
@@ -562,7 +626,7 @@ def calculate_score(company, legal, domain_link, dns, http, tls):
         "blockers": blockers,
         "complementary": complementary,
         "reasons": reasons,
-        "version_bareme": "2.5",
+        "version_bareme": "2.6",
     }
 
 
@@ -577,7 +641,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/health":
-            self.send_json({"status": "ok", "version": "2.5"})
+            self.send_json({"status": "ok", "version": "2.6"})
             return
         if self.path in ("/", "/index.html"):
             body = (Path("static") / "index.html").read_bytes()
@@ -627,5 +691,5 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    print(f"BifProtect Testeur V2.5 — écoute sur {HOST}:{PORT}")
+    print(f"BifProtect Testeur V2.6 — écoute sur {HOST}:{PORT}")
     ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()
