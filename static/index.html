@@ -2,7 +2,7 @@
 <html lang="fr">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>BifProtect — Testeur V2.1</title>
+<title>BifProtect — Testeur V2.2</title>
 <style>
 :root{--bg:#07111f;--card:#0d1b2d;--line:#223751;--text:#eef5ff;--muted:#91a4bd;--a:#35d0ba;--w:#ffc857;--d:#ff6b6b;--b:#63a8ff}
 *{box-sizing:border-box}body{margin:0;background:linear-gradient(145deg,#07111f,#0a1728);color:var(--text);font-family:Inter,system-ui,sans-serif}
@@ -14,7 +14,7 @@ table{width:100%;border-collapse:collapse;margin-top:15px}td,th{padding:11px 7px
 .section-title{margin:28px 0 8px;font-size:17px}.decision-box{padding:15px;border-radius:12px;background:#081522;margin-top:15px}.small{font-size:11px;color:var(--muted)}
 </style></head>
 <body><main>
-<div class="brand">BifProtect by Grisbiz</div><div class="sub">Testeur de qualification entreprise · domaine · sécurité — V2.1</div>
+<div class="brand">BifProtect by Grisbiz</div><div class="sub">Testeur de qualification entreprise · domaine · sécurité — V2.3</div>
 <section class="card"><div class="grid"><div><label for="siret">SIRET</label><input id="siret" maxlength="14" inputmode="numeric" placeholder="14 chiffres"></div><div><label for="site">Site marchand</label><input id="site" placeholder="https://www.exemple.fr"></div></div><button id="go">Lancer le contrôle</button><div id="msg" class="note"></div></section>
 <section id="result" class="card hidden"></section></main>
 <script>
@@ -31,20 +31,22 @@ const identityRows=[
 ["SIRET / entreprise",i.nom||"Non retrouvée",i.found],
 ["Entreprise active",i.etat==="A"?"Oui":(i.etat==="F"?"Cessée":"À vérifier"),i.etat==="A"],
 ["Établissement correspondant",i.establishment_match?"SIRET confirmé":"Non confirmé",i.establishment_match],
-["Établissement actif",i.establishment_state==="A"?"Oui":(i.establishment_state==="F"?"Fermé":"À vérifier"),i.establishment_state==="A"],
+["Établissement actif",i.establishment_state==="A"?"Oui":(i.establishment_state==="F"?"Fermé":"À vérifier"),i.establishment_state==="A"?true:(i.establishment_state==="F"?false:null)],
 ["Radiation",l.available?(l.radiation?"Signalée":"Aucune détectée"):"À vérifier",l.available?!l.radiation:null],
 ["Procédure collective",legalText(l),l.available?(!l.liquidation&&!l.redressement&&!l.sauvegarde):null]
 ];
 const techRows=[["DNS / IPv4",(c.dns.ipv4||[]).join(", ")||"Non résolu",!!c.dns.ipv4?.length],["Site accessible",c.http.reachable?"Oui":"Non",c.http.reachable],["HTTPS","Oui",true],["Certificat TLS",c.tls.valid?`${c.tls.tls_version||"Valide"} — ${c.tls.subject||""}`:"Non validé",c.tls.valid],["HSTS",c.http.security_headers["strict-transport-security"]?"Présent":"Absent",!!c.http.security_headers["strict-transport-security"]],["CSP",c.http.security_headers["content-security-policy"]?"Présente":"Absente",!!c.http.security_headers["content-security-policy"]],["X-Content-Type-Options",c.http.security_headers["x-content-type-options"]?"Présent":"Absent",!!c.http.security_headers["x-content-type-options"]],["X-Frame-Options",c.http.security_headers["x-frame-options"]?"Présent":"Absent",!!c.http.security_headers["x-frame-options"]],["URL finale",c.http.final_url||"—",!!c.http.final_url]];
-const renderRows=rows=>rows.map(a=>`<tr><td>${esc(a[0])}</td><td>${esc(a[1])}</td><td>${icon(a[2])}</td></tr>`).join("");
+const renderRows=rows=>rows.filter(a=>a[2]!==true).map(a=>`<tr><td>${esc(a[0])}</td><td>${esc(a[1])}</td><td>${icon(a[2])}</td></tr>`).join("");
+const hasFailures=rows=>rows.some(a=>a[2]!==true);
+const issueTable=(title,rows)=>hasFailures(rows)?`<h3 class="section-title">${title}</h3><table><tr><th>Contrôle</th><th>Résultat</th><th>État</th></tr>${renderRows(rows)}</table>`:'';
 const reserve=x.decision==="ELIGIBLE_SOUS_RESERVE";
 $("result").innerHTML=`<div class="scorebox"><div class="score">${x.score}</div><div><h2 style="margin:0 0 9px">Score BifProtect</h2>${badge(x.decision)}<p class="note">Le score mesure la compatibilité technique du site avec le protocole BifProtect. Il ne constitue pas une certification de sécurité.</p></div></div>
 <div class="decision-box"><strong>${x.can_subscribe?"Souscription possible":"Souscription impossible"}</strong><div class="note">${reserve?"Le contrôle complémentaire n'empêche pas la souscription. Un justificatif du lien entre l'entreprise et le domaine devra être fourni avant validation définitive.":x.final_validation?"Aucun justificatif complémentaire n'est requis par ce contrôle.":"Une condition bloquante empêche la souscription."}</div></div>
-<h3 class="section-title">1. Identité & statut juridique</h3><table><tr><th>Contrôle</th><th>Résultat</th><th>État</th></tr>${renderRows(identityRows)}</table>
-<h3 class="section-title">2. Rattachement du domaine</h3><table><tr><th>Contrôle</th><th>Résultat</th><th>État</th></tr><tr><td>Entreprise ↔ domaine</td><td>${esc(dl.label)}</td><td>${statusLabel(dl.status)}</td></tr></table>${dl.evidence?.length?dl.evidence.map(e=>`<div class="reason">${esc(e)}</div>`).join(""):''}
+${issueTable("1. Identité & statut juridique",identityRows)}
+${dl.status!=="VERIFIED"?`<h3 class="section-title">2. Rattachement du domaine</h3><table><tr><th>Contrôle</th><th>Résultat</th><th>État</th></tr><tr><td>Entreprise ↔ domaine</td><td>${esc(dl.label)}</td><td>${statusLabel(dl.status)}</td></tr></table>${dl.evidence?.length?dl.evidence.map(e=>`<div class="reason">${esc(e)}</div>`).join(""):''}`:''}
 ${reserve?`<div class="decision-box"><strong>📄 Justificatif à fournir</strong><div class="note">Document établissant le lien entre l'entreprise identifiée par le SIRET et le domaine exploité. Exemples : attestation signée du représentant légal, document contractuel d'exploitation du domaine, ou tout justificatif équivalent permettant d'établir ce lien.</div></div>`:''}
-<h3 class="section-title">3. Sécurité technique</h3><table><tr><th>Contrôle</th><th>Résultat</th><th>État</th></tr>${renderRows(techRows)}</table>
-<h3 class="section-title">Motifs</h3>${x.reasons.length?x.reasons.map(a=>`<div class="reason">${esc(a)}</div>`).join(""):'<div class="reason">Aucun motif négatif selon le barème V2.1.</div>'}<p class="small">Barème ${esc(x.version_bareme)} · Contrôle non intrusif.</p>`;
+${issueTable("3. Sécurité technique",techRows)}
+<h3 class="section-title">Points à traiter</h3>${x.reasons.length?x.reasons.map(a=>`<div class="reason">${esc(a)}</div>`).join(""):'<div class="reason ok">✓ Aucun point bloquant ou complémentaire.</div>'}<p class="small">Barème ${esc(x.version_bareme)} · Affichage limité aux contrôles non conformes ou à vérifier · Contrôle non intrusif.</p>`;
 $("result").classList.remove("hidden");$("msg").textContent="Contrôle terminé.";
 }catch(e){$("msg").textContent="Erreur : "+e.message}finally{$("go").disabled=false}}
 </script></body></html>
