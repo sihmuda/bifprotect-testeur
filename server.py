@@ -17,7 +17,7 @@ from urllib.parse import quote, urljoin, urlparse
 HOST = "0.0.0.0"
 PORT = int(os.environ.get("PORT", "10000"))
 TIMEOUT = 10
-USER_AGENT = "BifProtect-Testeur/2.9"
+USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36 BifProtect/3.0"
 
 SEARCH_API = "https://recherche-entreprises.api.gouv.fr/search?q="
 BODACC_API = "https://bodacc-datadila.opendatasoft.com/api/explore/v2.1/catalog/datasets/annonces-commerciales/records"
@@ -69,7 +69,12 @@ SAFE_OPENER = urllib.request.build_opener(SafeRedirectHandler())
 def open_safe(url, method="GET"):
     parsed = validate_site_url(url)
     public_ips(parsed.hostname)
-    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT}, method=method)
+    headers = {
+        "User-Agent": USER_AGENT,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,application/pdf;q=0.8,*/*;q=0.7",
+        "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.7",
+    }
+    req = urllib.request.Request(url, headers=headers, method=method)
     return SAFE_OPENER.open(req, timeout=TIMEOUT)
 
 
@@ -356,236 +361,173 @@ def _contains_registration(raw, siren):
 
 
 def extract_site_evidence(url, siren, company_name):
-    """Établit le rattachement domaine ↔ SIREN.
+    """Établit le rattachement domaine ↔ SIREN avec preuve juridique directe.
 
-    Une preuve directe est recherchée sur le domaine organisationnel du site,
-    y compris www et les sous-domaines officiels. Les pages HTML, PDF, liens
-    légaux et sitemaps sont inspectés sans suivre des domaines tiers.
+    La preuve doit venir du domaine organisationnel saisi, de www ou d'un
+    sous-domaine officiel de la même organisation. Pour un sous-domaine, on
+    exige en plus que la page juridique mentionne le SIREN et fasse référence
+    au domaine principal (ou y renvoie). Cela évite de confondre deux sociétés
+    simplement parce qu'elles partagent un suffixe DNS.
     """
-    result = {
-        "status": "UNKNOWN",
-        "label": "Non déterminé",
-        "direct_proof": False,
-        "score": 0,
-        "pages_checked": [],
-        "evidence": [],
-        "error": None,
-    }
+    result = {"status":"UNKNOWN","label":"Non déterminé","direct_proof":False,
+              "score":0,"pages_checked":[],"evidence":[],"error":None}
     try:
         base = validate_site_url(url)
         base_org = organizational_domain(base.hostname)
-        root = f"{base.scheme}://{base.netloc}"
-        legal_terms = (
-            "mentions", "mention-legale", "mentions-legales", "legal", "legal-notice",
-            "cgv", "conditions", "terms", "impressum", "qui-sommes", "a-propos",
-            "about", "rgpd", "privacy", "confidentialite", "cookies", "company"
-        )
+        base_host = base.hostname.lower().strip(".")
+        root = f"https://{base_org}"
+        legal_terms = ("mentions", "mention-legale", "mentions-legales", "legal", "legal-notice",
+                       "cgv", "conditions", "terms", "impressum", "qui-sommes", "a-propos",
+                       "about", "rgpd", "privacy", "confidentialite", "cookies", "company")
         direct_paths = [
             "mentions-legales", "mentions-legales/", "mentions_legales", "mentions_legales/",
             "legal-notice", "legal-notice/", "legal", "legal/", "cgv", "cgv/",
-            "conditions-generales-de-vente", "conditions-generales-de-vente/",
-            "contact", "a-propos", "about", "resources/RWD/other/mentions_legales.pdf",
-            "mentions_legales.pdf", "mentions-legales.pdf", "legal-notice.pdf"
+            "conditions-generales-de-vente", "conditions-generales-de-vente/", "contact",
+            "a-propos", "about", "resources/RWD/other/mentions_legales.pdf",
+            "resources/imagesok/cgv/ml.pdf", "mentions_legales.pdf", "mentions-legales.pdf",
+            "legal-notice.pdf"
         ]
-        candidates = [url] + [urljoin(root + "/", path) for path in direct_paths]
-        seen = set()
-        combined = []
-        discovered = []
-        sitemap_urls = []
+        seen=set(); discovered=[]; combined=[]
+
+        # Hôtes candidats : hôte saisi, www, puis quelques sous-domaines juridiques
+        # courants. Ils restent strictement dans le même domaine organisationnel.
+        prefixes=[base_host.split('.')[0]] if base_host else []
+        if base_org not in prefixes: prefixes += ["www"]
+        prefixes += ["marketplace","corporate","legal","company","about","business","pro","shop","store","support"]
+        candidate_hosts=[]
+        for prefix in prefixes:
+            h = base_org if prefix == base_org else (prefix + "." + base_org)
+            if h not in candidate_hosts and same_organizational_domain(h, base_org):
+                candidate_hosts.append(h)
+        if base_host not in candidate_hosts:
+            candidate_hosts.insert(0, base_host)
+        candidate_hosts = candidate_hosts[:12]
 
         def allowed(candidate):
             try:
-                p = urlparse(candidate)
-                return p.scheme.lower() == "https" and same_organizational_domain(p.hostname, base_org)
+                p=urlparse(candidate)
+                return p.scheme.lower()=="https" and same_organizational_domain(p.hostname, base_org)
             except Exception:
                 return False
 
         def add_candidate(candidate, force=False):
-            if not candidate:
-                return
+            if not candidate: return
             try:
-                p = urlparse(candidate)
-                if not allowed(candidate):
-                    return
-                low = candidate.lower()
-                path_low = p.path.lower()
-                is_pdf = path_low.endswith(".pdf") or ".pdf?" in low
-                is_legal = force or is_pdf or any(k in low for k in legal_terms)
-                if is_legal and candidate not in seen:
+                p=urlparse(candidate)
+                if not allowed(candidate): return
+                low=candidate.lower(); path_low=p.path.lower()
+                is_pdf=path_low.endswith('.pdf') or '.pdf?' in low
+                is_legal=force or is_pdf or any(k in low for k in legal_terms)
+                if is_legal and candidate not in seen and candidate not in discovered:
                     discovered.append(candidate)
-            except Exception:
-                return
+            except Exception: return
 
         def parse_html(raw, final_url):
-            parser = TextExtractor()
-            parser.feed(raw.decode("utf-8", errors="ignore"))
-            combined.append(normalize_text(" ".join(parser.parts)))
+            parser=TextExtractor(); parser.feed(raw.decode('utf-8',errors='ignore'))
+            text=normalize_text(" ".join(parser.parts)); combined.append(text)
             for href in parser.links:
-                try:
-                    candidate = urljoin(final_url, href)
-                    # Tout lien PDF ou page juridique du même domaine organisationnel
-                    # est candidat, y compris sur un sous-domaine officiel.
-                    add_candidate(candidate)
-                except Exception:
-                    pass
+                try: add_candidate(urljoin(final_url,href))
+                except Exception: pass
+
+        def page_proves_base(text, final_url):
+            if not text: return False
+            compact=normalize_text(text)
+            # Même hôte : une preuve SIREN sur une page légale du domaine saisi est directe.
+            host=urlparse(final_url).hostname or ""
+            if host.lower().strip('.') == base_host:
+                return True
+            # Sous-domaine : il faut une référence au domaine principal, à son www,
+            # ou un lien explicite vers celui-ci dans le contenu.
+            tokens={base_org, "www."+base_org, base_host}
+            return any(t in compact for t in tokens)
 
         def check_candidate(candidate):
-            if candidate in seen:
-                return
-            if not allowed(candidate):
-                return
+            if candidate in seen or not allowed(candidate): return
             seen.add(candidate)
             try:
-                with open_safe(candidate, "GET") as response:
-                    final_url = response.geturl()
-                    if not allowed(final_url):
-                        return
-                    content_type = (response.headers.get("Content-Type") or "").lower()
-                    raw = response.read(900_000)
+                with open_safe(candidate,"GET") as response:
+                    final_url=response.geturl()
+                    if not allowed(final_url): return
+                    ctype=(response.headers.get("Content-Type") or "").lower()
+                    raw=response.read(1_200_000)
                     result["pages_checked"].append(final_url)
-                    proof = _contains_registration(raw, siren)
+                    proof=_contains_registration(raw,siren)
                     if proof:
-                        result["direct_proof"] = True
-                        result["score"] = 100
-                        result["evidence"].append(f"{proof} retrouvé sur {final_url}")
-                    if "html" in content_type or final_url.lower().split("?", 1)[0].endswith((".html", ".htm", "/")):
-                        parse_html(raw, final_url)
-            except Exception:
+                        if ctype.startswith("application/pdf") or final_url.lower().split('?',1)[0].endswith('.pdf'):
+                            proof_ok=True
+                        else:
+                            parser=TextExtractor(); parser.feed(raw.decode('utf-8',errors='ignore'))
+                            proof_ok=page_proves_base(" ".join(parser.parts), final_url)
+                        if proof_ok:
+                            result["direct_proof"]=True; result["score"]=100
+                            result["evidence"].append(f"{proof} retrouvé sur {final_url}")
+                            return
+                    if "html" in ctype or final_url.lower().split('?',1)[0].endswith(('.html','.htm','/')):
+                        parse_html(raw,final_url)
+            except Exception as exc:
+                # Les erreurs individuelles ne doivent pas faire échouer toute la qualification.
                 return
 
-        # Première passe : page saisie + variantes légales connues.
-        for candidate in candidates:
+        # 1) Hôte saisi + www : preuve directe prioritaire.
+        for host in candidate_hosts[:2]:
+            for path in ["", *direct_paths]:
+                candidate = f"https://{host}/" if not path else f"https://{host}/{path.lstrip('/') }"
+                check_candidate(candidate)
+                if result["direct_proof"]: break
+            if result["direct_proof"]: break
+
+        # 2) Pages/sous-domaines juridiques de la même organisation.
+        if not result["direct_proof"]:
+            for host in candidate_hosts[2:]:
+                for path in direct_paths[:12]:
+                    check_candidate(f"https://{host}/{path}")
+                    if result["direct_proof"]: break
+                if result["direct_proof"]: break
+
+        # 3) Pages légales/PDF découvertes dans le HTML.
+        for candidate in discovered[:100]:
             check_candidate(candidate)
+            if result["direct_proof"]: break
 
-        # Deuxième passe : liens légaux/PDF découverts sur les pages du même domaine.
-        for candidate in discovered[:40]:
-            check_candidate(candidate)
-            if result["direct_proof"]:
-                break
-
-        # Troisième passe : robots.txt et sitemaps. Cela permet de retrouver une
-        # page légale/PDF non liée directement depuis la page d'accueil.
-        robots = urljoin(root + "/", "robots.txt")
-        try:
-            with open_safe(robots, "GET") as response:
-                raw = response.read(200_000)
-                text = raw.decode("utf-8", errors="ignore")
-                for line in text.splitlines():
-                    if line.lower().startswith("sitemap:"):
-                        sm = line.split(":", 1)[1].strip()
-                        if allowed(sm):
-                            sitemap_urls.append(sm)
-        except Exception:
-            pass
-        if not sitemap_urls:
-            sitemap_urls.append(urljoin(root + "/", "sitemap.xml"))
-
-        for sm in sitemap_urls[:3]:
+        # 4) Sitemaps : uniquement pour découvrir des URLs juridiques du même domaine.
+        sitemap_urls=[f"https://{h}/sitemap.xml" for h in candidate_hosts[:3]]
+        for sm in sitemap_urls:
             try:
-                if not allowed(sm):
-                    continue
-                with open_safe(sm, "GET") as response:
-                    raw = response.read(800_000)
-                    xml = raw.decode("utf-8", errors="ignore")
-                    for loc in re.findall(r"<loc>\s*(.*?)\s*</loc>", xml, flags=re.I | re.S):
-                        loc = html.unescape(loc.strip())
+                if not allowed(sm): continue
+                with open_safe(sm,"GET") as response:
+                    raw=response.read(1_000_000); xml=raw.decode('utf-8',errors='ignore')
+                    for loc in re.findall(r"<loc>\s*(.*?)\s*</loc>",xml,flags=re.I|re.S):
+                        loc=html.unescape(loc.strip())
                         if allowed(loc):
-                            low = loc.lower()
-                            if any(k in low for k in legal_terms) or low.endswith(".pdf"):
-                                add_candidate(loc, force=True)
-            except Exception:
-                continue
-        for candidate in discovered[:60]:
+                            low=loc.lower()
+                            if any(k in low for k in legal_terms) or low.endswith('.pdf'):
+                                add_candidate(loc,force=True)
+            except Exception: continue
+        for candidate in discovered[:100]:
             check_candidate(candidate)
-            if result["direct_proof"]:
-                break
+            if result["direct_proof"]: break
 
-        corpus = normalize_text(" ".join(combined))
-        domain_tokens = name_tokens(base.hostname.replace("www.", "").split(".")[0])
-        company_tokens = name_tokens(company_name)
-        overlap = company_tokens & domain_tokens
+        corpus=normalize_text(" ".join(combined))
+        domain_tokens=name_tokens(base_org.split('.')[0])
+        company_tokens=name_tokens(company_name)
+        overlap=company_tokens & domain_tokens
         if overlap:
-            result["score"] = max(result["score"], min(75, 40 + 10 * len(overlap)))
+            result["score"]=max(result["score"],min(75,40+10*len(overlap)))
             result["evidence"].append("Le nom de domaine partage des éléments significatifs avec la raison sociale.")
         if company_tokens:
-            page_overlap = {t for t in company_tokens if t in corpus}
+            page_overlap={t for t in company_tokens if t in corpus}
             if page_overlap:
-                result["score"] = max(result["score"], min(85, 45 + 8 * len(page_overlap)))
+                result["score"]=max(result["score"],min(85,45+8*len(page_overlap)))
                 result["evidence"].append("La raison sociale apparaît ou est cohérente avec le contenu du site.")
-
         if result["direct_proof"]:
-            result["status"] = "VERIFIED"
-            result["label"] = "Vérifié"
-        elif result["score"] >= 50:
-            result["status"] = "PROBABLE"
-            result["label"] = "Probable — justificatif requis"
+            result["status"]="VERIFIED"; result["label"]="Vérifié"
+        elif result["score"]>=50:
+            result["status"]="PROBABLE"; result["label"]="Probable — justificatif requis"
         else:
-            result["status"] = "UNCONFIRMED"
-            result["label"] = "Non établi — justificatif requis"
+            result["status"]="UNCONFIRMED"; result["label"]="Non établi — justificatif requis"
         return result
     except Exception as exc:
-        result["error"] = str(exc)
-        result["status"] = "UNKNOWN"
-        result["label"] = "Contrôle complémentaire requis"
-        return result
-
-
-# --- DNS / HTTP / TLS ---
-
-def dns_probe(hostname):
-    try:
-        ips = public_ips(hostname)
-        ipv4 = [x for x in ips if ":" not in x]
-        ipv6 = [x for x in ips if ":" in x]
-        return {"ipv4": ipv4, "ipv6": ipv6, "error": None}
-    except Exception as exc:
-        return {"ipv4": [], "ipv6": [], "error": str(exc)}
-
-
-SECURITY_HEADERS = [
-    "Strict-Transport-Security",
-    "Content-Security-Policy",
-    "X-Content-Type-Options",
-    "X-Frame-Options",
-    "Referrer-Policy",
-    "Permissions-Policy",
-]
-
-
-def http_probe(url):
-    result = {
-        "reachable": False, "status_code": None, "https": True, "final_url": None,
-        "security_headers": {}, "server": None, "error": None,
-    }
-    try:
-        with open_safe(url, "GET") as response:
-            result["reachable"] = True
-            result["status_code"] = response.status
-            result["final_url"] = response.geturl()
-            result["server"] = response.headers.get("Server")
-            for header in SECURITY_HEADERS:
-                value = response.headers.get(header)
-                if value:
-                    result["security_headers"][header.lower()] = value
-    except Exception as exc:
-        result["error"] = str(exc)
-    return result
-
-
-def tls_probe(hostname):
-    result = {"valid": False, "subject": None, "issuer": None, "tls_version": None, "error": None}
-    try:
-        context = ssl.create_default_context()
-        with socket.create_connection((hostname, 443), timeout=TIMEOUT) as raw:
-            with context.wrap_socket(raw, server_hostname=hostname) as tls_socket:
-                cert = tls_socket.getpeercert()
-                subject = dict(x[0] for x in cert.get("subject", []))
-                issuer = dict(x[0] for x in cert.get("issuer", []))
-                result.update(valid=True, subject=subject.get("commonName"), issuer=issuer.get("commonName"), tls_version=tls_socket.version())
-    except Exception as exc:
-        result["error"] = str(exc)
-    return result
-
+        result["error"]=str(exc); result["status"]="UNKNOWN"; result["label"]="Contrôle complémentaire requis"; return result
 
 # --- Barème / décision ---
 
@@ -671,7 +613,7 @@ def calculate_score(company, legal, domain_link, dns, http, tls):
         "blockers": blockers,
         "complementary": complementary,
         "reasons": reasons,
-        "version_bareme": "2.9",
+        "version_bareme": "3.0",
     }
 
 
@@ -686,7 +628,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/health":
-            self.send_json({"status": "ok", "version": "2.9"})
+            self.send_json({"status": "ok", "version": "3.0"})
             return
         if self.path in ("/", "/index.html"):
             body = (Path("static") / "index.html").read_bytes()
@@ -736,5 +678,5 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    print(f"BifProtect Testeur V2.9 — écoute sur {HOST}:{PORT}")
+    print(f"BifProtect Testeur V3.0 — écoute sur {HOST}:{PORT}")
     ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()
