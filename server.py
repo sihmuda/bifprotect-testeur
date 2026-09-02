@@ -16,7 +16,7 @@ from urllib.parse import quote, urljoin, urlparse
 HOST = "0.0.0.0"
 PORT = int(os.environ.get("PORT", "10000"))
 TIMEOUT = 10
-USER_AGENT = "BifProtect-Testeur/2.1"
+USER_AGENT = "BifProtect-Testeur/2.2"
 
 SEARCH_API = "https://recherche-entreprises.api.gouv.fr/search?q="
 BODACC_API = "https://bodacc-datadila.opendatasoft.com/api/explore/v2.1/catalog/datasets/annonces-commerciales/records"
@@ -102,15 +102,34 @@ def name_tokens(value):
 
 # --- Identité entreprise / établissement ---
 
+def _normalize_establishment_state(etab):
+    """Retourne uniquement A/F lorsque l'état de l'établissement est explicite."""
+    if not isinstance(etab, dict):
+        return None
+    state = etab.get("etat_administratif")
+    if isinstance(state, dict):
+        state = state.get("value") or state.get("code")
+    state = str(state or "").strip().upper()
+    return state if state in {"A", "F"} else None
+
+
 def _extract_establishment_matches(item, siret):
-    matches = []
-    for key in ("matching_etablissements",):
-        for etab in item.get(key) or []:
-            if str(etab.get("siret", "")) == siret:
-                matches.append(etab)
+    """
+    Retourne l'établissement correspondant au SIRET exact.
+
+    Priorité volontaire au siège lorsque son SIRET est exactement celui demandé :
+    le champ ``siege`` représente l'établissement de référence de l'unité légale.
+    On ne mélange jamais son état avec celui de l'unité légale.
+    """
+    siret = str(siret)
     siege = item.get("siege") or {}
     if str(siege.get("siret", "")) == siret:
-        matches.append(siege)
+        return [siege]
+
+    matches = []
+    for etab in item.get("matching_etablissements") or []:
+        if str(etab.get("siret", "")) == siret:
+            matches.append(etab)
     return matches
 
 
@@ -167,7 +186,11 @@ def identity(siret):
             }
 
         etat = chosen.get("etat_administratif") or ""
-        estab_state = (exact_estab or {}).get("etat_administratif") or etat
+        # IMPORTANT : l'état de l'unité légale (A/F) n'est pas l'état de
+        # l'établissement. Pour le SIRET exact, seule la donnée de
+        # l'établissement correspondant est utilisée. Une donnée absente
+        # reste inconnue et ne doit jamais être transformée en "Fermé".
+        estab_state = _normalize_establishment_state(exact_estab)
         return {
             "found": True,
             "siret": siret,
@@ -463,6 +486,8 @@ def calculate_score(company, legal, domain_link, dns, http, tls):
         blockers.append("L'entreprise est déclarée cessée.")
     elif company.get("establishment_state") == "F":
         blockers.append("L'établissement correspondant au SIRET est fermé.")
+    elif company.get("establishment_state") not in {"A", "F"}:
+        complementary.append("L'état administratif de l'établissement n'a pas pu être confirmé automatiquement.")
 
     if legal.get("available"):
         if legal.get("radiation"):
@@ -530,7 +555,7 @@ def calculate_score(company, legal, domain_link, dns, http, tls):
         "blockers": blockers,
         "complementary": complementary,
         "reasons": reasons,
-        "version_bareme": "2.1",
+        "version_bareme": "2.2",
     }
 
 
@@ -595,5 +620,5 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    print(f"BifProtect Testeur V2.1 — écoute sur {HOST}:{PORT}")
+    print(f"BifProtect Testeur V2.2 — écoute sur {HOST}:{PORT}")
     ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()
