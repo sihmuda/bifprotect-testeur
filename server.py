@@ -8,25 +8,20 @@ import socket
 import ssl
 import urllib.error
 import urllib.request
+from html.parser import HTMLParser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import quote, urlencode, urljoin, urlparse
+from urllib.parse import quote, urljoin, urlparse
 
 HOST = "0.0.0.0"
 PORT = int(os.environ.get("PORT", "10000"))
-TIMEOUT = 12
-USER_AGENT = "BifProtect-Testeur/2.0 (+https://bifprotect.fr)"
-MAX_LEGAL_PAGES = 6
-MAX_PAGE_BYTES = 700_000
+TIMEOUT = 10
+USER_AGENT = "BifProtect-Testeur/2.1"
 
-# Sources publiques utilisées par BifProtect.
-RECHERCHE_ENTREPRISES_URL = "https://recherche-entreprises.api.gouv.fr/search"
-BODACC_API_URL = os.environ.get(
-    "BODACC_API_URL",
-    "https://bodacc-datadila.opendatasoft.com/api/explore/v2.1/catalog/datasets/annonces-commerciales/records",
-)
+SEARCH_API = "https://recherche-entreprises.api.gouv.fr/search?q="
+BODACC_API = "https://bodacc-datadila.opendatasoft.com/api/explore/v2.1/catalog/datasets/annonces-commerciales/records"
 
-# --- Réseau : le service ne doit pas devenir un proxy vers des réseaux privés. ---
+# --- Sécurité réseau : pas de proxy vers des réseaux privés ---
 
 def public_ips(hostname):
     infos = socket.getaddrinfo(hostname, 443, type=socket.SOCK_STREAM)
@@ -73,13 +68,11 @@ SAFE_OPENER = urllib.request.build_opener(SafeRedirectHandler())
 def open_safe(url, method="GET"):
     parsed = validate_site_url(url)
     public_ips(parsed.hostname)
-    req = urllib.request.Request(
-        url,
-        headers={"User-Agent": USER_AGENT, "Accept": "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8"},
-        method=method,
-    )
+    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT}, method=method)
     return SAFE_OPENER.open(req, timeout=TIMEOUT)
 
+
+# --- Helpers ---
 
 def fetch_json(url):
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "application/json"})
@@ -87,273 +80,312 @@ def fetch_json(url):
         return json.loads(response.read().decode("utf-8"))
 
 
-def fetch_text(url, max_bytes=MAX_PAGE_BYTES):
-    with open_safe(url, "GET") as response:
-        data = response.read(max_bytes + 1)
-        truncated = len(data) > max_bytes
-        return data[:max_bytes].decode(response.headers.get_content_charset() or "utf-8", errors="replace"), response.geturl(), truncated
-
-
-# --- Identité légale : SIRENE / Annuaire des Entreprises (API publique). ---
-
-def _find_establishment(results, siret):
-    for company in results:
-        if company.get("siren") == siret[:9]:
-            for est in company.get("matching_etablissements") or []:
-                if est.get("siret") == siret:
-                    return company, est
-            siege = company.get("siege") or {}
-            if siege.get("siret") == siret:
-                return company, siege
-    return None, None
-
-
-def identity(siret):
-    try:
-        url = RECHERCHE_ENTREPRISES_URL + "?q=" + quote(siret) + "&per_page=20"
-        data = fetch_json(url)
-        results = data.get("results") or []
-        company, establishment = _find_establishment(results, siret)
-
-        if not company:
-            # Second passage : recherche sur le SIREN si l'API n'a pas indexé le SIRET.
-            url = RECHERCHE_ENTREPRISES_URL + "?q=" + quote(siret[:9]) + "&per_page=20"
-            data = fetch_json(url)
-            results = data.get("results") or []
-            company, establishment = _find_establishment(results, siret)
-
-        if not company:
-            return {"found": False, "siret": siret, "siren": siret[:9]}
-
-        legal_state = company.get("etat_administratif") or ""
-        establishment_state = (establishment or {}).get("etat_administratif") or ""
-        return {
-            "found": True,
-            "siret": siret,
-            "siren": company.get("siren") or siret[:9],
-            "nom": company.get("nom_complet") or company.get("nom_raison_sociale") or "",
-            "nom_raison_sociale": company.get("nom_raison_sociale") or "",
-            "etat": legal_state,
-            "etat_libelle": "Active" if legal_state == "A" else "Cessée" if legal_state == "C" else legal_state,
-            "etablissement_actif": establishment_state == "A",
-            "etablissement_etat": establishment_state,
-            "etablissement": establishment or {},
-            "date_creation": company.get("date_creation"),
-            "date_fermeture": company.get("date_fermeture"),
-            "date_mise_a_jour": company.get("date_mise_a_jour"),
-            "date_mise_a_jour_rne": company.get("date_mise_a_jour_rne"),
-            "siege": company.get("siege") or {},
-            "nature_juridique": company.get("nature_juridique"),
-        }
-    except Exception as exc:
-        return {"found": False, "siret": siret, "siren": siret[:9], "error": str(exc)}
-
-
-# --- BODACC : radiations et procédures collectives. Source officielle DILA. ---
-
-def _record_siren(record, siren):
-    values = record.get("registre") or []
-    if isinstance(values, str):
-        values = [values]
-    compact = {re.sub(r"\D", "", str(v)) for v in values}
-    return siren in compact
-
-
-def _record_text(record):
-    chunks = []
-    for key in ("familleavis_lib", "typeavis_lib", "commercant", "jugement", "acte", "radiationaurcs", "modificationsgenerales", "divers", "listepersonnes"):
-        value = record.get(key)
-        if value is not None:
-            chunks.append(str(value))
-    return " ".join(chunks).lower()
-
-
-def _is_collective(record):
-    family = str(record.get("familleavis_lib") or "").lower()
-    text = _record_text(record)
-    return "procédure" in family or "collective" in family or any(
-        word in text for word in ("liquidation judiciaire", "redressement judiciaire", "sauvegarde judiciaire")
-    )
-
-
-def _is_radiation(record):
-    family = str(record.get("familleavis_lib") or "").lower()
-    text = _record_text(record)
-    return "radiation" in family or bool(record.get("radiationaurcs")) or "radiation du rcs" in text
-
-
-def bodacc_status(siren):
-    """Returns a conservative legal-status signal from official BODACC open data.
-
-    BODACC publishes notices; it is not itself the sole source of truth for SIRENE status.
-    We therefore combine this signal with the SIRENE state above.
-    """
-    base = {
-        "available": False,
-        "source": "BODACC / DILA",
-        "radiation_detected": False,
-        "procedures": [],
-        "active_procedure": None,
-        "latest_relevant_date": None,
-        "error": None,
-    }
-    try:
-        query = urlencode({"limit": 100, "order_by": "dateparution desc", "where": f"registre like '{siren}'"})
-        try:
-            data = fetch_json(BODACC_API_URL + "?" + query)
-            records = [r for r in (data.get("results") or []) if _record_siren(r, siren)]
-        except Exception:
-            # Fallback si le moteur Opendatasoft refuse le filtre sur le champ tableau.
-            params = urlencode({"limit": 100, "order_by": "dateparution desc", "q": siren})
-            data = fetch_json(BODACC_API_URL + "?" + params)
-            records = [r for r in (data.get("results") or []) if _record_siren(r, siren)]
-        base["available"] = True
-
-        relevant = []
-        for record in records:
-            if not (_is_collective(record) or _is_radiation(record)):
-                continue
-            date = record.get("dateparution") or ""
-            relevant.append((date, record))
-        relevant.sort(key=lambda x: x[0], reverse=True)
-
-        for date, record in relevant:
-            text = _record_text(record)
-            family = str(record.get("familleavis_lib") or "")
-            if _is_radiation(record):
-                base["radiation_detected"] = True
-            if _is_collective(record):
-                if "liquidation" in text:
-                    kind = "LIQUIDATION_JUDICIAIRE"
-                elif "redressement" in text:
-                    kind = "REDRESSEMENT_JUDICIAIRE"
-                elif "sauvegarde" in text:
-                    kind = "SAUVEGARDE"
-                else:
-                    kind = "PROCEDURE_COLLECTIVE"
-                base["procedures"].append({
-                    "type": kind,
-                    "date": date,
-                    "famille": family,
-                    "tribunal": record.get("tribunal"),
-                    "url": record.get("url_complete"),
-                    "text": re.sub(r"\s+", " ", text)[:500],
-                })
-
-        # Les avis sont chronologiques. Pour une décision conservatoire, on retient le dernier avis.
-        if relevant:
-            base["latest_relevant_date"] = relevant[0][0]
-            latest_text = _record_text(relevant[0][1])
-            if _is_collective(relevant[0][1]):
-                if "liquidation" in latest_text:
-                    base["active_procedure"] = "LIQUIDATION_JUDICIAIRE"
-                elif "redressement" in latest_text:
-                    base["active_procedure"] = "REDRESSEMENT_JUDICIAIRE"
-                elif "sauvegarde" in latest_text:
-                    base["active_procedure"] = "SAUVEGARDE"
-                else:
-                    base["active_procedure"] = "PROCEDURE_COLLECTIVE"
-        return base
-    except Exception as exc:
-        base["error"] = str(exc)
-        return base
-
-
-# --- Rattachement entreprise ↔ domaine ---
-
-LEGAL_LINK_KEYWORDS = (
-    "mentions légales", "mentions legales", "informations légales", "informations legales",
-    "cgv", "conditions générales", "conditions generales", "legal notice", "legal",
-    "qui sommes-nous", "qui sommes nous", "à propos", "a propos", "about", "contact",
-)
-
-
 def normalize_text(value):
-    value = html.unescape(value or "")
-    value = re.sub(r"<script\b[^>]*>.*?</script>", " ", value, flags=re.I | re.S)
-    value = re.sub(r"<style\b[^>]*>.*?</style>", " ", value, flags=re.I | re.S)
-    value = re.sub(r"<[^>]+>", " ", value)
+    value = html.unescape(str(value or "")).lower()
     value = re.sub(r"\s+", " ", value)
     return value.strip()
 
 
-def _domain_candidates(base_url, html_text):
-    links = re.findall(r'href\s*=\s*["\']([^"\']+)["\']', html_text, flags=re.I)
-    base = urlparse(base_url)
-    candidates = []
-    for href in links:
-        absolute = urljoin(base_url, href)
-        try:
-            p = validate_site_url(absolute)
-        except Exception:
-            continue
-        if p.hostname != base.hostname:
-            continue
-        label = normalize_text(href).lower()
-        if any(k in label for k in LEGAL_LINK_KEYWORDS) or any(k in absolute.lower() for k in LEGAL_LINK_KEYWORDS):
-            candidates.append(absolute)
-    # Keep order and uniqueness.
-    return list(dict.fromkeys(candidates))[:MAX_LEGAL_PAGES]
+def normalize_name(value):
+    value = normalize_text(value)
+    value = re.sub(r"[^a-z0-9à-ÿ]+", " ", value)
+    return re.sub(r"\s+", " ", value).strip()
 
 
-def domain_link_probe(site, company):
+def name_tokens(value):
+    stop = {
+        "sa", "sas", "sasu", "sarl", "eurl", "sci", "sarl", "association", "de", "des", "du", "la", "le",
+        "les", "et", "en", "a", "au", "aux", "the", "company", "co", "france", "international"
+    }
+    return {t for t in normalize_name(value).split() if len(t) >= 4 and t not in stop}
+
+
+# --- Identité entreprise / établissement ---
+
+def _extract_establishment_matches(item, siret):
+    matches = []
+    for key in ("matching_etablissements",):
+        for etab in item.get(key) or []:
+            if str(etab.get("siret", "")) == siret:
+                matches.append(etab)
+    siege = item.get("siege") or {}
+    if str(siege.get("siret", "")) == siret:
+        matches.append(siege)
+    return matches
+
+
+def identity(siret):
+    """Vérifie l'unité légale et, séparément, le SIRET demandé."""
+    try:
+        data = fetch_json(SEARCH_API + quote(siret))
+        results = data.get("results") or []
+        if not results:
+            return {"found": False, "siret": siret, "source": "Recherche d'entreprises"}
+
+        # Recherche directe par SIRET. On ne fait pas confiance au seul premier résultat :
+        # on vérifie explicitement que le SIRET apparaît dans les données retournées.
+        chosen = None
+        exact_estab = None
+        for item in results:
+            matches = _extract_establishment_matches(item, siret)
+            if matches:
+                chosen = item
+                exact_estab = matches[0]
+                break
+            if str((item.get("siege") or {}).get("siret", "")) == siret:
+                chosen = item
+                exact_estab = item.get("siege")
+                break
+
+        # Si la recherche directe ne fournit pas l'établissement, on fait une recherche
+        # classique sur le nom de l'entreprise et vérifie matching_etablissements.
+        if chosen is None:
+            item0 = results[0]
+            nom = item0.get("nom_complet") or item0.get("nom_raison_sociale") or ""
+            if nom:
+                data2 = fetch_json(SEARCH_API + quote(nom))
+                for item in data2.get("results") or []:
+                    matches = _extract_establishment_matches(item, siret)
+                    if matches:
+                        chosen = item
+                        exact_estab = matches[0]
+                        break
+
+        if chosen is None:
+            # L'unité légale peut être retrouvée mais le SIRET précis n'a pas été confirmé.
+            item = results[0]
+            return {
+                "found": True,
+                "siret": siret,
+                "siren": item.get("siren") or siret[:9],
+                "nom": item.get("nom_complet") or item.get("nom_raison_sociale") or "",
+                "etat": item.get("etat_administratif") or "",
+                "date_fermeture": item.get("date_fermeture"),
+                "establishment_match": False,
+                "establishment_state": None,
+                "source": "Recherche d'entreprises",
+            }
+
+        etat = chosen.get("etat_administratif") or ""
+        estab_state = (exact_estab or {}).get("etat_administratif") or etat
+        return {
+            "found": True,
+            "siret": siret,
+            "siren": chosen.get("siren") or siret[:9],
+            "nom": chosen.get("nom_complet") or chosen.get("nom_raison_sociale") or "",
+            "etat": etat,
+            "date_fermeture": chosen.get("date_fermeture"),
+            "establishment_match": True,
+            "establishment_state": estab_state,
+            "establishment": exact_estab or {},
+            "source": "Recherche d'entreprises",
+        }
+    except Exception as exc:
+        return {"found": False, "siret": siret, "source": "Recherche d'entreprises", "error": str(exc)}
+
+
+# --- BODACC : procédures collectives / radiations publiées ---
+
+def _json_field(value):
+    if isinstance(value, dict):
+        return value
+    if not value:
+        return {}
+    try:
+        return json.loads(value)
+    except Exception:
+        return {"_text": str(value)}
+
+
+def _record_text(record):
+    parts = []
+    for key in ("jugement", "acte", "modificationsgenerales", "radiationaurcs", "divers", "typeavis_lib", "familleavis_lib"):
+        value = record.get(key)
+        if value:
+            obj = _json_field(value)
+            parts.append(json.dumps(obj, ensure_ascii=False) if isinstance(obj, dict) else str(obj))
+    return normalize_text(" ".join(parts))
+
+
+def legal_status(siren):
     result = {
-        "status": "NON_VERIFIE",
-        "score": 0,
-        "evidence": [],
-        "pages_checked": [],
+        "available": False,
+        "source": "BODACC / DILA",
+        "radiation": False,
+        "liquidation": False,
+        "redressement": False,
+        "sauvegarde": False,
+        "records": [],
         "error": None,
     }
-    if not company.get("found"):
-        result["error"] = "Entreprise non retrouvée : rattachement impossible."
+    if not siren:
+        result["error"] = "SIREN indisponible."
         return result
-
-    siret = company.get("siret", "")
-    siren = company.get("siren", siret[:9])
-    names = [company.get("nom") or "", company.get("nom_raison_sociale") or ""]
-    names = [re.sub(r"[^a-z0-9]+", "", x.lower()) for x in names if x]
-
     try:
-        home_text, final_url, truncated = fetch_text(site)
-        pages = [(site, home_text)]
-        candidates = _domain_candidates(final_url, home_text)
-        for candidate in candidates:
-            try:
-                text, resolved, _ = fetch_text(candidate)
-                pages.append((resolved, text))
-            except Exception:
-                continue
+        where = f'registre like "{siren}"'
+        params = f"?where={quote(where)}&order_by=dateparution%20desc&limit=50"
+        data = fetch_json(BODACC_API + params)
+        records = data.get("results") or []
+        result["available"] = True
+        result["records"] = records[:20]
 
-        seen = set()
-        for page_url, raw in pages:
-            if page_url in seen:
-                continue
-            seen.add(page_url)
-            clean = normalize_text(raw)
-            lower = clean.lower()
-            siret_found = bool(re.search(rf"(?<!\d){re.escape(siret[:3])}[\s.-]?{re.escape(siret[3:6])}[\s.-]?{re.escape(siret[6:9])}[\s.-]?{re.escape(siret[9:])}(?!\d)", clean))
-            siren_found = bool(re.search(rf"(?<!\d){re.escape(siren[:3])}[\s.-]?{re.escape(siren[3:6])}[\s.-]?{re.escape(siren[6:])}(?!\d)", clean))
-            name_found = any(len(n) >= 6 and n in re.sub(r"[^a-z0-9]+", "", lower) for n in names)
-            if siret_found:
-                result["score"] = max(result["score"], 100)
-                result["evidence"].append({"type": "SIRET", "page": page_url, "strength": "FORTE"})
-            elif siren_found:
-                result["score"] = max(result["score"], 90)
-                result["evidence"].append({"type": "SIREN", "page": page_url, "strength": "FORTE"})
-            elif name_found:
-                result["score"] = max(result["score"], 45)
-                result["evidence"].append({"type": "DENOMINATION", "page": page_url, "strength": "FAIBLE"})
-            result["pages_checked"].append(page_url)
+        # Le BODACC est un historique : une ancienne ouverture de procédure ne doit
+        # pas rester bloquante si une annonce ultérieure clôture la procédure.
+        procedure_events = []
+        for rec in records:
+            text = _record_text(rec)
+            radiation_field = normalize_text(rec.get("radiationaurcs"))
+            nature = normalize_text(_json_field(rec.get("jugement")).get("nature", ""))
 
-        if result["score"] >= 90:
-            result["status"] = "VERIFIE"
-        elif result["score"] >= 40:
-            result["status"] = "PROBABLE"
-        else:
-            result["status"] = "NON_ETABLI"
+            if radiation_field or "radiation" in text:
+                result["radiation"] = True
+
+            if nature and any(k in nature for k in (
+                "liquidation", "redressement", "sauvegarde", "procedure collective",
+                "procédure collective", "plan de sauvegarde", "plan de redressement"
+            )):
+                procedure_events.append((str(rec.get("dateparution") or ""), nature))
+
+        procedure_events.sort(reverse=True)
+        if procedure_events:
+            latest = procedure_events[0][1]
+            closure = any(x in latest for x in (
+                "clôture", "cloture", "fin de la procédure", "fin de la procedure",
+                "résolution du plan", "resolution du plan", "clôture pour insuffisance",
+                "cloture pour insuffisance"
+            ))
+            if not closure:
+                if "liquidation judiciaire" in latest or "ouverture de liquidation" in latest or "conversion en liquidation" in latest:
+                    result["liquidation"] = True
+                elif "redressement judiciaire" in latest or "ouverture d'une procédure de redressement" in latest:
+                    result["redressement"] = True
+                elif "sauvegarde" in latest:
+                    result["sauvegarde"] = True
+
+        # Les informations brutes restent visibles pour audit, mais on limite la charge utile.
+        result["records"] = [
+            {
+                "date": r.get("dateparution"),
+                "famille": r.get("familleavis_lib"),
+                "type": r.get("typeavis_lib"),
+                "nature": _json_field(r.get("jugement")).get("nature", "") if r.get("jugement") else "",
+                "url": r.get("url_complete") or "",
+            }
+            for r in result["records"]
+        ]
         return result
     except Exception as exc:
         result["error"] = str(exc)
+        return result
+
+
+# --- Rattachement domaine ↔ entreprise ---
+
+class TextExtractor(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.parts = []
+        self.links = []
+        self.title = ""
+        self._in_title = False
+
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        if tag.lower() == "a" and attrs.get("href"):
+            self.links.append(attrs["href"])
+        if tag.lower() == "title":
+            self._in_title = True
+
+    def handle_endtag(self, tag):
+        if tag.lower() == "title":
+            self._in_title = False
+
+    def handle_data(self, data):
+        text = data.strip()
+        if text:
+            self.parts.append(text)
+            if self._in_title:
+                self.title += " " + text
+
+
+def extract_site_evidence(url, siren, siret, company_name):
+    result = {
+        "status": "UNKNOWN",
+        "label": "Non déterminé",
+        "direct_proof": False,
+        "score": 0,
+        "pages_checked": [],
+        "evidence": [],
+        "error": None,
+    }
+    try:
+        base = validate_site_url(url)
+        root = f"{base.scheme}://{base.netloc}"
+        candidates = [
+            url,
+            urljoin(root + "/", "mentions-legales"),
+            urljoin(root + "/", "mentions-legales/"),
+            urljoin(root + "/", "legal-notice"),
+            urljoin(root + "/", "cgv"),
+            urljoin(root + "/", "conditions-generales-de-vente"),
+            urljoin(root + "/", "contact"),
+        ]
+        seen = set()
+        combined = []
+        for candidate in candidates:
+            p = urlparse(candidate)
+            if p.netloc != base.netloc or candidate in seen:
+                continue
+            seen.add(candidate)
+            try:
+                with open_safe(candidate, "GET") as response:
+                    content_type = (response.headers.get("Content-Type") or "").lower()
+                    if "text/html" not in content_type and candidate != url:
+                        continue
+                    raw = response.read(700_000).decode("utf-8", errors="ignore")
+                    parser = TextExtractor()
+                    parser.feed(raw)
+                    text = normalize_text(" ".join(parser.parts))
+                    combined.append(text)
+                    result["pages_checked"].append(response.geturl())
+                    if siren and siren in re.sub(r"\D", "", raw):
+                        result["direct_proof"] = True
+                        result["score"] = max(result["score"], 100)
+                        result["evidence"].append(f"SIREN {siren} retrouvé sur {response.geturl()}")
+                    if siret and siret in re.sub(r"\D", "", raw):
+                        result["direct_proof"] = True
+                        result["score"] = max(result["score"], 100)
+                        result["evidence"].append(f"SIRET {siret} retrouvé sur {response.geturl()}")
+            except Exception:
+                continue
+
+        corpus = normalize_text(" ".join(combined))
+        domain_tokens = name_tokens(base.hostname.replace("www.", "").split(".")[0])
+        company_tokens = name_tokens(company_name)
+        overlap = company_tokens & domain_tokens
+        if overlap:
+            result["score"] = max(result["score"], min(75, 40 + 10 * len(overlap)))
+            result["evidence"].append("Le nom de domaine partage des éléments significatifs avec la raison sociale.")
+        if company_tokens:
+            page_overlap = {t for t in company_tokens if t in corpus}
+            if page_overlap:
+                result["score"] = max(result["score"], min(85, 45 + 8 * len(page_overlap)))
+                result["evidence"].append("La raison sociale apparaît ou est cohérente avec le contenu du site.")
+
+        if result["direct_proof"]:
+            result["status"] = "VERIFIED"
+            result["label"] = "Vérifié"
+        elif result["score"] >= 50:
+            result["status"] = "PROBABLE"
+            result["label"] = "Probable — justificatif requis"
+        else:
+            result["status"] = "UNCONFIRMED"
+            result["label"] = "Non établi — justificatif requis"
+        return result
+    except Exception as exc:
+        result["error"] = str(exc)
+        result["status"] = "UNKNOWN"
+        result["label"] = "Contrôle complémentaire requis"
         return result
 
 
@@ -381,13 +413,8 @@ SECURITY_HEADERS = [
 
 def http_probe(url):
     result = {
-        "reachable": False,
-        "status_code": None,
-        "https": True,
-        "final_url": None,
-        "security_headers": {},
-        "server": None,
-        "error": None,
+        "reachable": False, "status_code": None, "https": True, "final_url": None,
+        "security_headers": {}, "server": None, "error": None,
     }
     try:
         with open_safe(url, "GET") as response:
@@ -413,24 +440,45 @@ def tls_probe(hostname):
                 cert = tls_socket.getpeercert()
                 subject = dict(x[0] for x in cert.get("subject", []))
                 issuer = dict(x[0] for x in cert.get("issuer", []))
-                result.update(
-                    valid=True,
-                    subject=subject.get("commonName"),
-                    issuer=issuer.get("commonName"),
-                    tls_version=tls_socket.version(),
-                )
+                result.update(valid=True, subject=subject.get("commonName"), issuer=issuer.get("commonName"), tls_version=tls_socket.version())
     except Exception as exc:
         result["error"] = str(exc)
     return result
 
 
-# --- Score : technique + garde juridique. ---
+# --- Barème / décision ---
 
-def calculate_score(company, legal, link, dns, http, tls):
+def calculate_score(company, legal, domain_link, dns, http, tls):
     score = 100
     reasons = []
+    blockers = []
+    complementary = []
 
-    # Les contrôles techniques conservent la logique V1.
+    if not company.get("found"):
+        score -= 20
+        blockers.append("SIRET non retrouvé dans la source publique interrogée.")
+    elif not company.get("establishment_match"):
+        complementary.append("Le SIRET précis n'a pas pu être confirmé automatiquement.")
+    elif company.get("etat") == "F":
+        blockers.append("L'entreprise est déclarée cessée.")
+    elif company.get("establishment_state") == "F":
+        blockers.append("L'établissement correspondant au SIRET est fermé.")
+
+    if legal.get("available"):
+        if legal.get("radiation"):
+            blockers.append("Une radiation est signalée dans les annonces BODACC.")
+        if legal.get("liquidation"):
+            blockers.append("Une procédure de liquidation judiciaire est signalée.")
+        if legal.get("redressement"):
+            complementary.append("Une procédure de redressement judiciaire est signalée.")
+        if legal.get("sauvegarde"):
+            complementary.append("Une procédure de sauvegarde est signalée.")
+    else:
+        complementary.append("Le contrôle BODACC n'a pas pu être réalisé automatiquement.")
+
+    if domain_link.get("status") != "VERIFIED":
+        complementary.append("Le lien entre le domaine et le SIRET n'est pas établi par une preuve juridique directe : justificatif requis avant validation définitive.")
+
     if not dns.get("ipv4"):
         score -= 20
         reasons.append("Aucune adresse IPv4 publique résolue.")
@@ -451,67 +499,38 @@ def calculate_score(company, legal, link, dns, http, tls):
             score -= penalty
             reasons.append(reason)
 
-    # Le statut juridique est un garde-fou : il ne se compense pas par un bon score technique.
-    legal_gate = True
-    if not company.get("found"):
-        legal_gate = False
-        reasons.append("SIRET non retrouvé dans la source publique interrogée.")
-    elif company.get("etat") != "A":
-        legal_gate = False
-        reasons.append("Unité légale non active / cessée.")
-    if company.get("found") and not company.get("etablissement_actif"):
-        legal_gate = False
-        reasons.append("L'établissement correspondant au SIRET n'est pas actif.")
-
-    if legal.get("radiation_detected"):
-        legal_gate = False
-        reasons.append("Une radiation est signalée dans les annonces BODACC.")
-    if legal.get("active_procedure") == "LIQUIDATION_JUDICIAIRE":
-        legal_gate = False
-        reasons.append("Une liquidation judiciaire est signalée.")
-    elif legal.get("active_procedure") == "REDRESSEMENT_JUDICIAIRE":
-        reasons.append("Un redressement judiciaire est signalé : contrôle renforcé requis.")
-    elif legal.get("active_procedure") == "SAUVEGARDE":
-        reasons.append("Une procédure de sauvegarde est signalée : contrôle renforcé requis.")
-
-    if legal.get("available") is False:
-        legal_gate = False
-        reasons.append("Le contrôle BODACC n'a pas pu être effectué : statut juridique à confirmer.")
-
-    # Le rattachement du domaine est un contrôle bloquant : une simple ressemblance de marque ne suffit pas.
-    if link.get("status") != "VERIFIE":
-        legal_gate = False
-        if link.get("status") == "PROBABLE":
-            reasons.append("Le lien entre le domaine et le SIRET est seulement probable ; preuve juridique directe requise.")
-        else:
-            reasons.append("Le lien entre le domaine et le SIRET n'a pas été établi.")
-
     score = max(0, min(100, score))
-    if not legal_gate:
-        decision = "NON_ELIGIBLE" if any(
-            x in reasons for x in (
-                "Unité légale non active / cessée.",
-                "L'établissement correspondant au SIRET n'est pas actif.",
-                "Une radiation est signalée dans les annonces BODACC.",
-                "Une liquidation judiciaire est signalée.",
-                "Le lien entre le domaine et le SIRET n'a pas été établi.",
-            )
-        ) else "CONTROLE_COMPLEMENTAIRE"
-    elif legal.get("active_procedure") in ("REDRESSEMENT_JUDICIAIRE", "SAUVEGARDE"):
-        decision = "SURVEILLANCE_RENFORCEE"
+
+    # Règle métier demandée : le complémentaire n'empêche pas la souscription.
+    # Il empêche uniquement la validation définitive tant que le justificatif n'est pas fourni.
+    if blockers:
+        decision = "NON_ELIGIBLE"
+        decision_label = "NON ÉLIGIBLE"
+    elif complementary:
+        decision = "ELIGIBLE_SOUS_RESERVE"
+        decision_label = "ÉLIGIBLE SOUS RÉSERVE"
     elif score >= 80:
         decision = "ELIGIBLE"
+        decision_label = "ÉLIGIBLE"
     elif score >= 60:
         decision = "SURVEILLANCE_RENFORCEE"
+        decision_label = "SURVEILLANCE RENFORCÉE"
     else:
         decision = "CONTROLE_COMPLEMENTAIRE"
+        decision_label = "CONTRÔLE COMPLÉMENTAIRE"
 
+    reasons.extend(complementary)
     return {
         "score": score,
         "decision": decision,
-        "legal_gate": legal_gate,
+        "decision_label": decision_label,
+        "can_subscribe": not bool(blockers),
+        "final_validation": not bool(blockers) and not bool(complementary),
+        "justificatif_required": bool(complementary) and not bool(blockers),
+        "blockers": blockers,
+        "complementary": complementary,
         "reasons": reasons,
-        "version_bareme": "2.0",
+        "version_bareme": "2.1",
     }
 
 
@@ -521,13 +540,12 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
-        self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
         self.wfile.write(body)
 
     def do_GET(self):
         if self.path == "/health":
-            self.send_json({"status": "ok", "version": "2.0"})
+            self.send_json({"status": "ok", "version": "2.1"})
             return
         if self.path in ("/", "/index.html"):
             body = (Path("static") / "index.html").read_bytes()
@@ -548,34 +566,24 @@ class Handler(BaseHTTPRequestHandler):
             payload = json.loads(self.rfile.read(length))
             siret = str(payload.get("siret", "")).strip()
             site = str(payload.get("site", "")).strip()
-
             if not re.fullmatch(r"\d{14}", siret):
                 self.send_json({"detail": "SIRET invalide : 14 chiffres attendus."}, 400)
                 return
-
             parsed = validate_site_url(site)
             hostname = parsed.hostname
 
             company = identity(siret)
-            legal = bodacc_status(company.get("siren", siret[:9])) if company.get("found") else {
-                "available": False,
-                "source": "BODACC / DILA",
-                "radiation_detected": False,
-                "procedures": [],
-                "active_procedure": None,
-                "latest_relevant_date": None,
-                "error": "SIREN indisponible",
-            }
-            link = domain_link_probe(site, company)
+            legal = legal_status(company.get("siren") or siret[:9]) if company.get("found") else legal_status(siret[:9])
             dns = dns_probe(hostname)
             http = http_probe(site)
             tls = tls_probe(hostname)
-            decision = calculate_score(company, legal, link, dns, http, tls)
+            domain_link = extract_site_evidence(site, company.get("siren") or siret[:9], siret, company.get("nom", ""))
+            decision = calculate_score(company, legal, domain_link, dns, http, tls)
 
             self.send_json({
                 "identity": company,
                 "legal": legal,
-                "domain_link": link,
+                "domain_link": domain_link,
                 "hostname": hostname,
                 "controls": {"dns": dns, "http": http, "tls": tls},
                 "decision": decision,
@@ -587,5 +595,5 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    print(f"BifProtect Testeur V2 — écoute sur {HOST}:{PORT}")
+    print(f"BifProtect Testeur V2.1 — écoute sur {HOST}:{PORT}")
     ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()
