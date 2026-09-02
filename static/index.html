@@ -84,8 +84,8 @@ $("go").onclick=async()=>{
 
     let technicalValue;
     let technicalText;
-    if(blocked){
-      technicalValue="Analyse partielle";
+    if(blocked && techIssues===0){
+      technicalValue="Contrôle technique partiellement mesurable";
       technicalText="L'accès automatisé est protégé. Les contrôles non mesurables ne sont pas pénalisés.";
     }else if(techIssues===0){
       technicalValue="Aucun écart détecté";
@@ -135,7 +135,7 @@ $("go").onclick=async()=>{
         </div>
       </div>
 
-      ${(!reserve && !blocked && !(x.blockers?.length) && domainOk && l.available && !l.radiation && !l.liquidation && !l.redressement && !l.sauvegarde && i.found && i.etat==="A" && techIssues===0) ? `
+      ${(!reserve && !(x.blockers?.length) && domainOk && l.available && !l.radiation && !l.liquidation && !l.redressement && !l.sauvegarde && i.found && i.etat==="A" && techIssues===0) ? `
         <div class="qualification-ok"><span class="ok-dot">✓</span><div><strong>Qualification conforme</strong><span>Entreprise, domaine, statut juridique et contrôles techniques conformes.</span></div></div>` : `
         <h3 class="section-title">Synthèse de qualification</h3>
         <div class="status-grid">
@@ -144,11 +144,10 @@ $("go").onclick=async()=>{
           <div class="status-card"><div class="label">Entreprise ↔ domaine</div><div class="value ${domainOk?'ok':(dl.status==='PROBABLE'?'warn':'bad')}">${esc(domainSummary(dl))}</div></div>
         </div>
 
-        ${blocked?`<div class="action"><strong class="warn">Accès automatisé protégé</strong><p>Le site répond à un mécanisme de protection destiné aux accès automatisés. BifProtect ne considère pas cette situation comme une défaillance du site et n'impute aucune absence d'en-tête HTTP non mesurée.</p></div>`:''}
         ${x.blockers?.length?`<div class="action"><strong class="bad">Condition bloquante détectée</strong><p>La qualification ne peut pas être validée automatiquement tant que cette condition juridique n'est pas levée.</p></div>`:''}
         ${reserve?`<div class="action"><strong class="warn">Justificatif complémentaire</strong><p>Le contrôle complémentaire n'empêche pas la souscription, mais le justificatif requis devra être obtenu avant la validation définitive.</p></div>`:''}
       `}
-      <p class="footer-note">Barème ${esc(x.version_bareme||"3.10")} · Analyse non intrusive · Les contrôles conformes sont intégrés au calcul mais ne sont pas détaillés dans cette synthèse.</p>`;
+      <p class="footer-note">Barème ${esc(x.version_bareme||"3.14")} · Analyse non intrusive · Les contrôles conformes sont intégrés au calcul mais ne sont pas détaillés dans cette synthèse.</p>`;
     $("result").classList.remove("hidden");
     $("msg").textContent="Analyse terminée — résultat consolidé.";
   }catch(e){
