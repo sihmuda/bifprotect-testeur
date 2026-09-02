@@ -148,7 +148,7 @@ $("go").onclick=async()=>{
         ${x.blockers?.length?`<div class="action"><strong class="bad">Condition bloquante détectée</strong><p>La qualification ne peut pas être validée automatiquement tant que cette condition juridique n'est pas levée.</p></div>`:''}
         ${reserve?`<div class="action"><strong class="warn">Justificatif complémentaire</strong><p>Le contrôle complémentaire n'empêche pas la souscription, mais le justificatif requis devra être obtenu avant la validation définitive.</p></div>`:''}
       `}
-      <p class="footer-note">Barème ${esc(x.version_bareme||"3.8")} · Analyse non intrusive · Les contrôles conformes sont intégrés au calcul mais ne sont pas détaillés dans cette synthèse.</p>`;
+      <p class="footer-note">Barème ${esc(x.version_bareme||"3.10")} · Analyse non intrusive · Les contrôles conformes sont intégrés au calcul mais ne sont pas détaillés dans cette synthèse.</p>`;
     $("result").classList.remove("hidden");
     $("msg").textContent="Analyse terminée — résultat consolidé.";
   }catch(e){
