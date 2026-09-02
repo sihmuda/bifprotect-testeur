@@ -478,10 +478,15 @@ def extract_site_evidence(url, siren, company_name):
         # Accueil d'abord : une seule requête permet de détecter rapidement une preuve
         # et de découvrir les véritables liens légaux du site.
         home_candidates=[f"https://{base_host}/"]
-        if base_host != "www."+base_org and base_host != base_org:
+        if base_host != "www."+base_org:
             home_candidates.append(f"https://www.{base_org}/")
-        elif base_host == base_org:
-            home_candidates.append(f"https://www.{base_org}/")
+        # Certains grands marchands publient leurs mentions légales sur un
+        # sous-domaine fonctionnel (ex. marketplace.cdiscount.com) plutôt que
+        # directement sur www. On vérifie seulement quelques sous-domaines
+        # conventionnels, sans exploration arbitraire.
+        for sub in ("marketplace", "legal", "corporate"):
+            home_candidates.append(f"https://{sub}.{base_org}/")
+        home_candidates=list(dict.fromkeys(home_candidates))
 
         with ThreadPoolExecutor(max_workers=min(2,len(home_candidates))) as pool:
             futures=[pool.submit(check_candidate,c) for c in home_candidates]
@@ -493,9 +498,8 @@ def extract_site_evidence(url, siren, company_name):
         if not result["direct_proof"]:
             # Pages légales prioritaires, uniquement sur le domaine saisi et www.
             priority=[]
-            hosts=[base_host]
-            www=f"www.{base_org}"
-            if www not in hosts: hosts.append(www)
+            hosts=[base_host, f"www.{base_org}", f"marketplace.{base_org}", f"legal.{base_org}", f"corporate.{base_org}"]
+            hosts=list(dict.fromkeys(hosts))
             for host in hosts:
                 for path in direct_paths:
                     candidate=f"https://{host}/{path}"
@@ -759,7 +763,7 @@ def calculate_score(company, legal, domain_link, dns, http, tls):
         "automated_access_blocked": access_blocked,
         "technical_measurement": "PARTIAL" if access_blocked else ("MEASURED" if http_measured else "LIMITED"),
         "technical_score_available": technical_score_available,
-        "version_bareme": "3.10",
+        "version_bareme": "3.11",
     }
 
 
