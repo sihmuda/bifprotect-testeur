@@ -16,10 +16,10 @@ from urllib.parse import quote, urljoin, urlparse
 HOST = "0.0.0.0"
 PORT = int(os.environ.get("PORT", "10000"))
 TIMEOUT = 10
-USER_AGENT = "BifProtect-Testeur/2.2"
+USER_AGENT = "BifProtect-Testeur/2.5"
 
 SEARCH_API = "https://recherche-entreprises.api.gouv.fr/search?q="
-BODACC_API = "https://bodacc-datadila.opendatasoft.com/api/explore/v2.1/catalog/datasets/annonces-commerciales/records"
+BODACC_API = "https://bodacc-datadila.opendatasoft.com/api/explore/v2.5/catalog/datasets/annonces-commerciales/records"
 
 # --- Sécurité réseau : pas de proxy vers des réseaux privés ---
 
@@ -477,17 +477,24 @@ def calculate_score(company, legal, domain_link, dns, http, tls):
     blockers = []
     complementary = []
 
+    # Garde-fous juridiques : chaque condition est évaluée indépendamment.
+    # Une absence de confirmation du SIRET ne doit jamais masquer une cessation
+    # de l'unité légale, et une donnée d'établissement inconnue ne doit jamais
+    # être interprétée comme "fermé".
     if not company.get("found"):
         score -= 20
         blockers.append("SIRET non retrouvé dans la source publique interrogée.")
-    elif not company.get("establishment_match"):
-        complementary.append("Le SIRET précis n'a pas pu être confirmé automatiquement.")
-    elif company.get("etat") == "F":
-        blockers.append("L'entreprise est déclarée cessée.")
-    elif company.get("establishment_state") == "F":
-        blockers.append("L'établissement correspondant au SIRET est fermé.")
-    elif company.get("establishment_state") not in {"A", "F"}:
-        complementary.append("L'état administratif de l'établissement n'a pas pu être confirmé automatiquement.")
+    else:
+        if company.get("etat") == "F":
+            blockers.append("L'entreprise est déclarée cessée.")
+
+        if not company.get("establishment_match"):
+            complementary.append("Le SIRET précis n'a pas pu être confirmé automatiquement.")
+        else:
+            if company.get("establishment_state") == "F":
+                blockers.append("L'établissement correspondant au SIRET est fermé.")
+            elif company.get("establishment_state") not in {"A", "F"}:
+                complementary.append("L'état administratif de l'établissement n'a pas pu être confirmé automatiquement.")
 
     if legal.get("available"):
         if legal.get("radiation"):
@@ -555,7 +562,7 @@ def calculate_score(company, legal, domain_link, dns, http, tls):
         "blockers": blockers,
         "complementary": complementary,
         "reasons": reasons,
-        "version_bareme": "2.4",
+        "version_bareme": "2.5",
     }
 
 
@@ -570,7 +577,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/health":
-            self.send_json({"status": "ok", "version": "2.1"})
+            self.send_json({"status": "ok", "version": "2.5"})
             return
         if self.path in ("/", "/index.html"):
             body = (Path("static") / "index.html").read_bytes()
@@ -620,5 +627,5 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    print(f"BifProtect Testeur V2.2 — écoute sur {HOST}:{PORT}")
+    print(f"BifProtect Testeur V2.5 — écoute sur {HOST}:{PORT}")
     ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()

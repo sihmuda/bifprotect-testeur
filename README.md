@@ -1,4 +1,4 @@
-# BifProtect Testeur V2.4
+# BifProtect Testeur V2.5
 
 Prototype de qualification non intrusive d'un site marchand à partir d'un SIRET et d'une URL.
 
@@ -27,5 +27,14 @@ Le score technique n'est pas une certification de sécurité.
 L'API RNE/INPI peut être intégrée ultérieurement avec les identifiants techniques INPI afin de renforcer le contrôle des observations, radiations et procédures collectives.
 
 
-### Affichage V2.4
+### Affichage V2.5
 L’interface n’affiche que le score, la décision et les contrôles non conformes, à vérifier ou complémentaires. Les contrôles conformes et leurs preuves positives sont masqués.
+
+
+## V2.5 — règles renforcées
+- Affichage utilisateur limité au score, à la décision et aux contrôles non conformes / à vérifier / complémentaires / bloquants.
+- Les contrôles conformes ne sont pas affichés dans les tableaux.
+- Priorité stricte des garde-fous juridiques sur les contrôles complémentaires.
+- Une entreprise cessée reste bloquante même si le SIRET exact n'est pas confirmé.
+- Un établissement fermé est bloquant ; un état d'établissement inconnu est complémentaire.
+- Une décision complémentaire permet la souscription mais impose un justificatif avant validation définitive.

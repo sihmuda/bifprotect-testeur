@@ -1,2 +1,2 @@
-# BifProtect V2.1 : aucune dépendance Python externe.
+# BifProtect V2.5 : aucune dépendance Python externe.
 # Bibliothèque standard uniquement.
