@@ -1,0 +1,8 @@
+services:
+  - type: web
+    name: bifprotect-testeur
+    runtime: python
+    plan: free
+    buildCommand: python -m compileall .
+    startCommand: python server.py
+    healthCheckPath: /health
