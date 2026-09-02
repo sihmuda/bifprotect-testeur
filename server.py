@@ -69,6 +69,44 @@ class SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
 
 SAFE_OPENER = urllib.request.build_opener(SafeRedirectHandler())
 
+class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+NO_REDIRECT_OPENER = urllib.request.build_opener(NoRedirectHandler())
+
+
+def inspect_redirect(url):
+    """Inspecte uniquement le premier redirect sans le suivre automatiquement.
+
+    Permet d'établir une chaîne de rattachement : domaine saisi -> domaine cible.
+    La cible est validée comme URL HTTPS et son IP doit être publique.
+    """
+    parsed = validate_site_url(url)
+    public_ips(parsed.hostname)
+    headers = {
+        "User-Agent": LEGAL_USER_AGENT,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.7",
+        "Referer": f"https://{parsed.hostname}/",
+    }
+    req = urllib.request.Request(url, headers=headers, method="GET")
+    try:
+        with NO_REDIRECT_OPENER.open(req, timeout=TIMEOUT) as response:
+            return None
+    except urllib.error.HTTPError as exc:
+        if exc.code in (301, 302, 303, 307, 308):
+            location = exc.headers.get("Location")
+            if not location:
+                return None
+            target = urljoin(url, location)
+            target_parsed = validate_site_url(target)
+            public_ips(target_parsed.hostname)
+            return {"from": url, "to": target, "status_code": exc.code}
+        return None
+    except Exception:
+        return None
+
 
 def open_safe(url, method="GET", user_agent=None):
     parsed = validate_site_url(url)
@@ -376,11 +414,27 @@ def extract_site_evidence(url, siren, company_name):
     Les sous-domaines arbitraires et le sitemap ne sont plus explorés automatiquement.
     """
     result = {"status":"UNKNOWN","label":"Non déterminé","direct_proof":False,
-              "score":0,"pages_checked":[],"evidence":[],"error":None}
+              "score":0,"pages_checked":[],"evidence":[],"redirect_chain":[],"error":None}
     try:
         base = validate_site_url(url)
         base_org = organizational_domain(base.hostname)
         base_host = base.hostname.lower().strip(".")
+        redirect_chain = []
+
+        # Cas important : un domaine national peut rediriger vers le domaine
+        # principal de la marque (ex. cdiscount.fr -> cdiscount.com). On conserve
+        # cette chaîne au lieu de perdre l'information dans le gestionnaire HTTP.
+        try:
+            hop = inspect_redirect(url)
+            if hop:
+                redirect_chain.append(hop)
+                result["redirect_chain"].append(hop)
+                result["evidence"].append(
+                    f"Redirection {hop['status_code']} : {urlparse(hop['from']).hostname} → {urlparse(hop['to']).hostname}"
+                )
+        except Exception:
+            pass
+
         legal_terms = ("mentions", "mention-legale", "mentions-legales", "legal", "legal-notice",
                        "cgv", "conditions", "terms", "impressum", "qui-sommes", "a-propos",
                        "about", "rgpd", "privacy", "confidentialite", "cookies", "company")
@@ -529,6 +583,33 @@ def extract_site_evidence(url, siren, company_name):
         domain_tokens=name_tokens(base_org.split('.')[0])
         company_tokens=name_tokens(company_name)
         overlap=company_tokens & domain_tokens
+
+        # Preuve renforcée : si le domaine final d'une redirection correspond
+        # explicitement à un élément de la dénomination officielle retournée par
+        # Recherche Entreprises (ex. CDISCOUNT.COM), la chaîne domaine -> domaine
+        # de marque est directement rattachée à l'identité SIREN.
+        redirect_verified = False
+        for hop in redirect_chain:
+            target_host = (urlparse(hop["to"]).hostname or "").lower().strip(".")
+            target_label = target_host.split(".")[0]
+            target_tokens = name_tokens(target_label)
+            if target_label and target_label in normalize_name(company_name).split():
+                redirect_verified = True
+                result["direct_proof"] = True
+                result["score"] = 100
+                result["evidence"].append(
+                    f"Le domaine cible {target_host} est explicitement associé à la dénomination officielle de l'entreprise."
+                )
+                break
+            if target_tokens and target_tokens & company_tokens:
+                redirect_verified = True
+                result["direct_proof"] = True
+                result["score"] = 100
+                result["evidence"].append(
+                    f"Le domaine cible {target_host} partage un identifiant de marque avec la dénomination officielle de l'entreprise."
+                )
+                break
+
         if overlap:
             result["score"]=max(result["score"],min(75,40+10*len(overlap)))
             result["evidence"].append("Le nom de domaine partage des éléments significatifs avec la raison sociale.")
@@ -767,7 +848,7 @@ def calculate_score(company, legal, domain_link, dns, http, tls):
         "automated_access_blocked": access_blocked,
         "technical_measurement": "PARTIAL" if access_blocked else ("MEASURED" if http_measured else "LIMITED"),
         "technical_score_available": technical_score_available,
-        "version_bareme": "3.12",
+        "version_bareme": "3.13",
     }
 
 
@@ -782,7 +863,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/health":
-            self.send_json({"status": "ok", "version": "3.12"})
+            self.send_json({"status": "ok", "version": "3.13"})
             return
         if self.path in ("/", "/index.html"):
             body = (Path("static") / "index.html").read_bytes()
