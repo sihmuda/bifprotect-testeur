@@ -791,7 +791,7 @@ def calculate_score(company, legal, domain_link, dns, http, tls):
         "automated_access_blocked": access_blocked,
         "technical_measurement": "PARTIAL" if access_blocked else ("MEASURED" if http_measured else "LIMITED"),
         "technical_score_available": technical_score_available,
-        "version_bareme": "3.4",
+        "version_bareme": "3.5",
     }
 
 
@@ -806,7 +806,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/health":
-            self.send_json({"status": "ok", "version": "3.4"})
+            self.send_json({"status": "ok", "version": "3.5"})
             return
         if self.path in ("/", "/index.html"):
             body = (Path("static") / "index.html").read_bytes()
@@ -860,5 +860,5 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    print(f"BifProtect Testeur V3.4 — écoute sur {HOST}:{PORT}")
+    print(f"BifProtect Testeur V3.5 — écoute sur {HOST}:{PORT}")
     ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()
