@@ -1,121 +1,50 @@
 <!doctype html>
 <html lang="fr">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>BifProtect — Testeur V2</title>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>BifProtect — Testeur V2.1</title>
 <style>
-:root{--bg:#07111f;--card:#0d1b2d;--line:#223751;--text:#eef5ff;--muted:#91a4bd;--a:#35d0ba;--w:#ffc857;--d:#ff6b6b;--b:#69a7ff}
+:root{--bg:#07111f;--card:#0d1b2d;--line:#223751;--text:#eef5ff;--muted:#91a4bd;--a:#35d0ba;--w:#ffc857;--d:#ff6b6b;--b:#63a8ff}
 *{box-sizing:border-box}body{margin:0;background:linear-gradient(145deg,#07111f,#0a1728);color:var(--text);font-family:Inter,system-ui,sans-serif}
-main{max-width:1020px;margin:35px auto;padding:20px}.brand{font-size:25px;font-weight:850}.sub{color:var(--muted);margin:5px 0 25px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:24px;margin:18px 0;box-shadow:0 18px 50px #0004}
-.grid{display:grid;grid-template-columns:1fr 1.5fr;gap:15px}@media(max-width:700px){.grid{grid-template-columns:1fr}}
-label{display:block;color:var(--muted);font-size:13px;margin-bottom:7px}
-input{width:100%;background:#081522;color:#fff;border:1px solid #2a4562;border-radius:10px;padding:13px;font-size:15px}
-button{margin-top:18px;border:0;border-radius:10px;padding:13px 20px;background:var(--a);color:#06131d;font-weight:850;cursor:pointer}button:disabled{opacity:.5}
-.note{font-size:12px;color:var(--muted);line-height:1.55;margin-top:13px}.hidden{display:none}
-.scorebox{display:flex;align-items:center;gap:24px}.score{width:130px;height:130px;border:9px solid var(--a);border-radius:50%;display:grid;place-items:center;font-size:38px;font-weight:900}
-.badge{display:inline-block;padding:7px 11px;border-radius:999px;background:#183247;font-weight:800}.ok{color:var(--a)}.warn{color:var(--w)}.bad{color:var(--d)}.blue{color:var(--b)}
-.section-title{display:flex;justify-content:space-between;gap:10px;align-items:center;margin-top:28px}.section-title h3{margin:0}.smallbadge{font-size:11px;padding:5px 8px;border-radius:999px;background:#162b42;color:var(--muted)}
-table{width:100%;border-collapse:collapse;margin-top:15px}td,th{padding:11px 7px;border-bottom:1px solid var(--line);font-size:13px;text-align:left;vertical-align:top}th{color:var(--muted)}
-.reason{padding:10px 12px;margin:7px 0;background:#081522;border-radius:9px;font-size:13px}.evidence{padding:9px 11px;margin:6px 0;background:#081522;border-left:3px solid var(--a);border-radius:7px;font-size:12px}.pill{font-size:11px;color:var(--muted)}
-.legalgrid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-top:15px}@media(max-width:700px){.legalgrid{grid-template-columns:1fr}}
-.legalitem{padding:14px;background:#081522;border:1px solid var(--line);border-radius:12px}.legalitem strong{display:block;margin-bottom:6px}.status{font-weight:800}.source{font-size:11px;color:var(--muted);margin-top:8px}
-</style>
-</head>
-<body>
-<main>
-<div class="brand">BifProtect by Grisbiz</div>
-<div class="sub">Testeur de qualification entreprise + domaine + sécurité — V2</div>
-
-<section class="card">
-<div class="grid">
-<div><label for="siret">SIRET</label><input id="siret" maxlength="14" inputmode="numeric" placeholder="14 chiffres"></div>
-<div><label for="site">Site marchand</label><input id="site" placeholder="https://www.exemple.fr"></div>
-</div>
-<button id="go">Lancer le contrôle</button>
-<div id="msg" class="note"></div>
-</section>
-
-<section id="result" class="card hidden"></section>
-</main>
-
+main{max-width:980px;margin:30px auto;padding:20px}.brand{font-size:25px;font-weight:850}.sub{color:var(--muted);margin:5px 0 25px}.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:24px;margin:18px 0;box-shadow:0 18px 50px #0004}
+.grid{display:grid;grid-template-columns:1fr 1.5fr;gap:15px}@media(max-width:700px){.grid{grid-template-columns:1fr}}label{display:block;color:var(--muted);font-size:13px;margin-bottom:7px}input{width:100%;background:#081522;color:#fff;border:1px solid #2a4562;border-radius:10px;padding:13px;font-size:15px}
+button{margin-top:18px;border:0;border-radius:10px;padding:13px 20px;background:var(--a);color:#06131d;font-weight:850;cursor:pointer}button:disabled{opacity:.5}.note{font-size:12px;color:var(--muted);line-height:1.5;margin-top:13px}.hidden{display:none}
+.scorebox{display:flex;align-items:center;gap:24px}.score{width:130px;height:130px;border:9px solid var(--a);border-radius:50%;display:grid;place-items:center;font-size:38px;font-weight:900}.badge{display:inline-block;padding:7px 11px;border-radius:999px;background:#183247;font-weight:800}.ok{color:var(--a)}.warn{color:var(--w)}.bad{color:var(--d)}.blue{color:var(--b)}
+table{width:100%;border-collapse:collapse;margin-top:15px}td,th{padding:11px 7px;border-bottom:1px solid var(--line);font-size:13px;text-align:left;vertical-align:top}th{color:var(--muted)}.reason{padding:10px 12px;margin:7px 0;background:#081522;border-radius:9px;font-size:13px}.pill{font-size:11px;color:var(--muted)}
+.section-title{margin:28px 0 8px;font-size:17px}.decision-box{padding:15px;border-radius:12px;background:#081522;margin-top:15px}.small{font-size:11px;color:var(--muted)}
+</style></head>
+<body><main>
+<div class="brand">BifProtect by Grisbiz</div><div class="sub">Testeur de qualification entreprise · domaine · sécurité — V2.1</div>
+<section class="card"><div class="grid"><div><label for="siret">SIRET</label><input id="siret" maxlength="14" inputmode="numeric" placeholder="14 chiffres"></div><div><label for="site">Site marchand</label><input id="site" placeholder="https://www.exemple.fr"></div></div><button id="go">Lancer le contrôle</button><div id="msg" class="note"></div></section>
+<section id="result" class="card hidden"></section></main>
 <script>
-const $=x=>document.getElementById(x);
-const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#039;"}[c]));
+const $=x=>document.getElementById(x);const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#039;"}[c]));
 const icon=v=>v===true?'<span class="ok">✓</span>':v===false?'<span class="bad">✕</span>':'<span class="pill">—</span>';
-function badge(d){
- if(d==="ELIGIBLE")return '<span class="badge ok">ÉLIGIBLE</span>';
- if(d==="SURVEILLANCE_RENFORCEE")return '<span class="badge warn">SURVEILLANCE RENFORCÉE</span>';
- if(d==="NON_ELIGIBLE")return '<span class="badge bad">NON ÉLIGIBLE</span>';
- return '<span class="badge blue">CONTRÔLE COMPLÉMENTAIRE</span>';
-}
-function statusLabel(s){
- const m={VERIFIE:'Vérifié',PROBABLE:'Probable',NON_ETABLI:'Non établi',NON_VERIFIE:'Non vérifié'};return m[s]||s||'—';
-}
-function legalStatus(c,l){
- const active=c?.etat==='A'; const est=c?.etablissement_actif===true; const rad=l?.radiation_detected===true;
- let proc=l?.active_procedure||null;
- return {active,est,rad,proc};
-}
+function badge(d){if(d==="ELIGIBLE")return'<span class="badge ok">ÉLIGIBLE</span>';if(d==="ELIGIBLE_SOUS_RESERVE")return'<span class="badge warn">ÉLIGIBLE SOUS RÉSERVE</span>';if(d==="NON_ELIGIBLE")return'<span class="badge bad">NON ÉLIGIBLE</span>';return'<span class="badge warn">SURVEILLANCE / CONTRÔLE</span>'}
+function statusLabel(s){return s==="VERIFIED"?'<span class="ok">Vérifié</span>':s==="PROBABLE"?'<span class="warn">Probable</span>':'<span class="bad">Non établi</span>'}
+function legalText(l){if(!l.available)return"Non vérifiable automatiquement";return l.radiation?"Radiation signalée":l.liquidation?"Liquidation judiciaire signalée":l.redressement?"Redressement judiciaire signalé":l.sauvegarde?"Sauvegarde signalée":"Aucune alerte BODACC détectée"}
 
-$("go").onclick=async()=>{
- const s=$("siret").value.trim(),site=$("site").value.trim();
- if(!/^\d{14}$/.test(s)){alert("SIRET invalide : 14 chiffres.");return}
- if(!/^https:\/\//i.test(site)){alert("Pour ce test, l'URL doit commencer par https://");return}
- $("go").disabled=true;$("msg").textContent="Vérification entreprise, statut juridique, rattachement du domaine et sécurité du site…";$("result").classList.add("hidden");
- try{
-  const r=await fetch("/api/check",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({siret:s,site})});
-  const d=await r.json();if(!r.ok)throw Error(d.detail||"Erreur");
-  const c=d.controls,x=d.decision,li=legalStatus(d.identity,d.legal),link=d.domain_link||{};
-  const rows=[
-   ["SIRET / entreprise",d.identity?.nom||"Non retrouvée",d.identity?.found],
-   ["Entreprise active",d.identity?.etat==='A'?"Oui":"Non",d.identity?.etat==='A'],
-   ["Établissement correspondant actif",d.identity?.etablissement_actif?"Oui":"Non",d.identity?.etablissement_actif],
-   ["Radiation signalée",li.rad?"Oui":"Non",li.rad?false:true],
-   ["Procédure collective",li.proc?li.proc:"Aucune signalée",li.proc?false:true],
-   ["Domaine ↔ SIRET",statusLabel(link.status),link.status==="VERIFIE"],
-   ["DNS / IPv4",(c.dns.ipv4||[]).join(", ")||"Non résolu",!!c.dns.ipv4?.length],
-   ["Site accessible",c.http.reachable?"Oui":"Non",c.http.reachable],
-   ["HTTPS","Oui",true],
-   ["Certificat TLS",c.tls.valid?`${c.tls.tls_version||"Valide"} — ${c.tls.subject||""}`:"Non validé",c.tls.valid],
-   ["HSTS",c.http.security_headers["strict-transport-security"]?"Présent":"Absent",!!c.http.security_headers["strict-transport-security"]],
-   ["CSP",c.http.security_headers["content-security-policy"]?"Présente":"Absente",!!c.http.security_headers["content-security-policy"]],
-   ["X-Content-Type-Options",c.http.security_headers["x-content-type-options"]?"Présent":"Absent",!!c.http.security_headers["x-content-type-options"]],
-   ["X-Frame-Options",c.http.security_headers["x-frame-options"]?"Présent":"Absent",!!c.http.security_headers["x-frame-options"]],
-   ["URL finale",c.http.final_url||"—",c.http.final_url?true:null]
-  ];
-  const procText=li.proc?li.proc.replaceAll('_',' '):'Aucune procédure collective signalée dans les données consultées';
-  const evidence=(link.evidence||[]).map(e=>`<div class="evidence"><strong>${esc(e.type)}</strong> — ${esc(e.strength)}<br><span class="pill">${esc(e.page)}</span></div>`).join('')||'<div class="reason">Aucune preuve directe de rattachement trouvée dans les pages analysées.</div>';
-  const procedures=(d.legal?.procedures||[]).slice(0,5).map(p=>`<div class="reason"><strong>${esc(p.type)}</strong> — ${esc(p.date||'date inconnue')}<br><span class="pill">${esc(p.tribunal||'Tribunal non précisé')}</span></div>`).join('');
-  $("result").innerHTML=`
-  <div class="scorebox"><div class="score">${x.score}</div><div><h2 style="margin:0 0 9px">Score technique BifProtect</h2>${badge(x.decision)}<p class="note">Le score technique mesure la compatibilité du site avec le prototype. L'éligibilité est également soumise aux contrôles d'identité juridique et de rattachement du domaine.</p></div></div>
-
-  <div class="section-title"><h3>1. Identité & statut juridique</h3><span class="smallbadge">Garde-fou d'éligibilité</span></div>
-  <div class="legalgrid">
-   <div class="legalitem"><strong>Entreprise</strong><span class="status ${d.identity?.found?'ok':'bad'}">${esc(d.identity?.nom||'Non retrouvée')}</span><div class="source">SIREN ${esc(d.identity?.siren||'—')}</div></div>
-   <div class="legalitem"><strong>Unité légale</strong><span class="status ${li.active?'ok':'bad'}">${li.active?'ACTIVE':'NON ACTIVE'}</span><div class="source">Source : SIRENE / recherche-entreprises</div></div>
-   <div class="legalitem"><strong>Établissement SIRET</strong><span class="status ${li.est?'ok':'bad'}">${li.est?'ACTIF':'NON ACTIF'}</span><div class="source">SIRET ${esc(s)}</div></div>
-   <div class="legalitem"><strong>Radiation</strong><span class="status ${li.rad?'bad':'ok'}">${li.rad?'SIGNALÉE':'AUCUNE SIGNALÉE'}</span><div class="source">Source : BODACC / DILA</div></div>
-   <div class="legalitem"><strong>Procédure collective</strong><span class="status ${li.proc?'bad':'ok'}">${esc(procText)}</span><div class="source">Dernières annonces pertinentes consultées</div></div>
-   <div class="legalitem"><strong>Domaine ↔ SIRET</strong><span class="status ${link.status==='VERIFIE'?'ok':link.status==='PROBABLE'?'warn':'bad'}">${esc(statusLabel(link.status))}</span><div class="source">Preuve directe SIREN/SIRET recherchée dans le site</div></div>
-  </div>
-
-  <div class="section-title"><h3>2. Preuves de rattachement du domaine</h3><span class="smallbadge">${esc((link.pages_checked||[]).length)} page(s)</span></div>
-  ${evidence}
-
-  ${procedures?`<div class="section-title"><h3>3. Historique BODACC pertinent</h3></div>${procedures}`:''}
-
-  <div class="section-title"><h3>${procedures?'4':'3'}. Contrôles techniques</h3><span class="smallbadge">Barème V2</span></div>
-  <table><tr><th>Contrôle</th><th>Résultat</th><th>État</th></tr>${rows.map(a=>`<tr><td>${esc(a[0])}</td><td>${esc(a[1])}</td><td>${icon(a[2])}</td></tr>`).join("")}</table>
-
-  <div class="section-title"><h3>Motifs / décisions</h3></div>
-  ${x.reasons.length?x.reasons.map(a=>`<div class="reason">${esc(a)}</div>`).join(""):'<div class="reason">Aucun motif négatif selon le barème V2.</div>'}
-  <p class="note">Version du barème : ${esc(x.version_bareme)}. Le contrôle de rattachement cherche en priorité le SIRET/SIREN dans les mentions légales, informations société, CGV ou pages assimilées. Une simple correspondance de marque ne suffit pas. Aucun scan intrusif n'est effectué.</p>`;
-  $("result").classList.remove("hidden");$("msg").textContent="Contrôle terminé.";
- }catch(e){$("msg").textContent="Erreur : "+e.message}
- finally{$("go").disabled=false}
-}
-</script>
-</body>
-</html>
+$("go").onclick=async()=>{const s=$("siret").value.trim(),site=$("site").value.trim();if(!/^\d{14}$/.test(s)){alert("SIRET invalide : 14 chiffres.");return}if(!/^https:\/\//i.test(site)){alert("L'URL doit commencer par https://");return}
+$("go").disabled=true;$("msg").textContent="Vérification entreprise, statut juridique, rattachement du domaine et sécurité…";$("result").classList.add("hidden");
+try{const r=await fetch("/api/check",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({siret:s,site})});const d=await r.json();if(!r.ok)throw Error(d.detail||"Erreur");const c=d.controls,x=d.decision,i=d.identity,l=d.legal,dl=d.domain_link;
+const identityRows=[
+["SIRET / entreprise",i.nom||"Non retrouvée",i.found],
+["Entreprise active",i.etat==="A"?"Oui":(i.etat==="F"?"Cessée":"À vérifier"),i.etat==="A"],
+["Établissement correspondant",i.establishment_match?"SIRET confirmé":"Non confirmé",i.establishment_match],
+["Établissement actif",i.establishment_state==="A"?"Oui":(i.establishment_state==="F"?"Fermé":"À vérifier"),i.establishment_state==="A"],
+["Radiation",l.available?(l.radiation?"Signalée":"Aucune détectée"):"À vérifier",l.available?!l.radiation:null],
+["Procédure collective",legalText(l),l.available?(!l.liquidation&&!l.redressement&&!l.sauvegarde):null]
+];
+const techRows=[["DNS / IPv4",(c.dns.ipv4||[]).join(", ")||"Non résolu",!!c.dns.ipv4?.length],["Site accessible",c.http.reachable?"Oui":"Non",c.http.reachable],["HTTPS","Oui",true],["Certificat TLS",c.tls.valid?`${c.tls.tls_version||"Valide"} — ${c.tls.subject||""}`:"Non validé",c.tls.valid],["HSTS",c.http.security_headers["strict-transport-security"]?"Présent":"Absent",!!c.http.security_headers["strict-transport-security"]],["CSP",c.http.security_headers["content-security-policy"]?"Présente":"Absente",!!c.http.security_headers["content-security-policy"]],["X-Content-Type-Options",c.http.security_headers["x-content-type-options"]?"Présent":"Absent",!!c.http.security_headers["x-content-type-options"]],["X-Frame-Options",c.http.security_headers["x-frame-options"]?"Présent":"Absent",!!c.http.security_headers["x-frame-options"]],["URL finale",c.http.final_url||"—",!!c.http.final_url]];
+const renderRows=rows=>rows.map(a=>`<tr><td>${esc(a[0])}</td><td>${esc(a[1])}</td><td>${icon(a[2])}</td></tr>`).join("");
+const reserve=x.decision==="ELIGIBLE_SOUS_RESERVE";
+$("result").innerHTML=`<div class="scorebox"><div class="score">${x.score}</div><div><h2 style="margin:0 0 9px">Score BifProtect</h2>${badge(x.decision)}<p class="note">Le score mesure la compatibilité technique du site avec le protocole BifProtect. Il ne constitue pas une certification de sécurité.</p></div></div>
+<div class="decision-box"><strong>${x.can_subscribe?"Souscription possible":"Souscription impossible"}</strong><div class="note">${reserve?"Le contrôle complémentaire n'empêche pas la souscription. Un justificatif du lien entre l'entreprise et le domaine devra être fourni avant validation définitive.":x.final_validation?"Aucun justificatif complémentaire n'est requis par ce contrôle.":"Une condition bloquante empêche la souscription."}</div></div>
+<h3 class="section-title">1. Identité & statut juridique</h3><table><tr><th>Contrôle</th><th>Résultat</th><th>État</th></tr>${renderRows(identityRows)}</table>
+<h3 class="section-title">2. Rattachement du domaine</h3><table><tr><th>Contrôle</th><th>Résultat</th><th>État</th></tr><tr><td>Entreprise ↔ domaine</td><td>${esc(dl.label)}</td><td>${statusLabel(dl.status)}</td></tr></table>${dl.evidence?.length?dl.evidence.map(e=>`<div class="reason">${esc(e)}</div>`).join(""):''}
+${reserve?`<div class="decision-box"><strong>📄 Justificatif à fournir</strong><div class="note">Document établissant le lien entre l'entreprise identifiée par le SIRET et le domaine exploité. Exemples : attestation signée du représentant légal, document contractuel d'exploitation du domaine, ou tout justificatif équivalent permettant d'établir ce lien.</div></div>`:''}
+<h3 class="section-title">3. Sécurité technique</h3><table><tr><th>Contrôle</th><th>Résultat</th><th>État</th></tr>${renderRows(techRows)}</table>
+<h3 class="section-title">Motifs</h3>${x.reasons.length?x.reasons.map(a=>`<div class="reason">${esc(a)}</div>`).join(""):'<div class="reason">Aucun motif négatif selon le barème V2.1.</div>'}<p class="small">Barème ${esc(x.version_bareme)} · Contrôle non intrusif.</p>`;
+$("result").classList.remove("hidden");$("msg").textContent="Contrôle terminé.";
+}catch(e){$("msg").textContent="Erreur : "+e.message}finally{$("go").disabled=false}}
+</script></body></html>
