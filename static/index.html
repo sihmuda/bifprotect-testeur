@@ -3,79 +3,39 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>BifProtect — Qualification</title>
+<title>BifProtect — La protection optimale de vos revenus</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
-:root{
-  --bg:#07090B;--fg:#F1EEE8;--muted:#A7A49E;--line:#3A3F43;--accent:#C9B48A;
-  --ok:#B8C9B1;--warn:#D6B879;--bad:#C9877D;
-}
-*{box-sizing:border-box}
-html{background:var(--bg)}
-body{margin:0;min-height:100vh;background:var(--bg);color:var(--fg);font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;line-height:1.45;-webkit-font-smoothing:antialiased}
-main{width:min(1000px,100%);margin:0 auto;padding:30px 20px 60px}
-nav{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--line);padding:9px 0 14px;margin-bottom:32px}
-.logo{font-weight:700;letter-spacing:.12em;text-transform:uppercase;font-size:14px}.tag{color:var(--accent);font-size:10px;letter-spacing:.11em;text-transform:uppercase}
-.hero{padding:0 0 30px;border-bottom:1px solid var(--line)}
-.eyebrow{color:var(--accent);font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.13em;margin:0 0 10px}
-h1{margin:0;max-width:760px;font-size:clamp(34px,5vw,54px);line-height:1;letter-spacing:-.045em;font-weight:700}
-section{padding:30px 0;border-bottom:1px solid var(--line)}
-.section-kicker{color:var(--accent);font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.12em;margin-bottom:15px}
-.form-grid{display:grid;grid-template-columns:.72fr 1.28fr;gap:12px}
-@media(max-width:700px){main{padding:24px 16px 50px}.form-grid{grid-template-columns:1fr}.tag{display:none}}
-.field label{display:block;color:var(--muted);font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.09em;margin:0 0 7px}
-input{width:100%;height:48px;background:transparent;color:var(--fg);border:1px solid var(--line);border-radius:0;padding:0 13px;font:500 14px Inter,system-ui,sans-serif;outline:none;transition:border-color .18s,background .18s}
-input:focus{border-color:var(--accent);background:#0A0C0E}
-button{height:46px;margin-top:15px;border:1px solid var(--accent);border-radius:0;padding:0 19px;background:var(--accent);color:#11110F;font:700 11px Inter,system-ui,sans-serif;text-transform:uppercase;letter-spacing:.07em;cursor:pointer;transition:background .15s,transform .15s}
-button:hover{background:#D8C39A;transform:translateY(-1px)}button:disabled{opacity:.6;cursor:wait;transform:none}
-.status-line{min-height:22px;margin-top:12px;color:var(--muted);font-size:11px;line-height:1.5}
-.loading{display:flex;align-items:center;gap:9px}.spinner{width:13px;height:13px;border:1px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:spin .75s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
-.hidden{display:none!important}
-#result{padding-top:30px}
-.result-head{display:grid;grid-template-columns:138px 1fr;gap:28px;align-items:start}
-@media(max-width:620px){.result-head{grid-template-columns:1fr;gap:20px}}
-.score-wrap{border-top:1px solid var(--accent);padding-top:10px}.score-label{color:var(--accent);font-size:10px;text-transform:uppercase;letter-spacing:.11em;font-weight:600}.score{font-size:58px;line-height:.95;font-weight:700;letter-spacing:-.055em;margin-top:8px}.score-unit{color:var(--muted);font-size:10px;margin-top:6px}
-.result-title{margin:0 0 10px;font-size:25px;line-height:1.05;letter-spacing:-.025em;font-weight:700}
-.badge{display:inline-flex;align-items:center;padding:6px 9px;border:1px solid var(--line);font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.08em}.badge.ok{border-color:#657262;color:var(--ok)}.badge.warn{border-color:#776845;color:var(--warn)}.badge.bad{border-color:#704D49;color:var(--bad)}
-.disclaimer{margin:12px 0 0;color:var(--muted);font-size:11px;line-height:1.55;max-width:650px}
-.summary{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:30px}@media(max-width:650px){.summary{grid-template-columns:1fr}}
-.summary-card{border:1px solid var(--line);padding:17px 18px;min-height:125px}.summary-kicker{color:var(--accent);font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.1em}.summary-value{font-size:16px;font-weight:700;letter-spacing:-.015em;margin-top:9px}.summary-text{color:var(--muted);font-size:11px;line-height:1.55;margin-top:6px}
-.section-title{font-size:19px;letter-spacing:-.02em;margin:34px 0 14px;font-weight:700}
-.status-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
-@media(max-width:700px){.status-grid{grid-template-columns:1fr}}
-.status-card{padding:16px 15px 17px;border-right:1px solid var(--line)}.status-card:last-child{border-right:0}@media(max-width:700px){.status-card{border-right:0;border-bottom:1px solid var(--line)}.status-card:last-child{border-bottom:0}}
-.status-card .label{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px}.status-card .value{font-size:12px;font-weight:600;line-height:1.45}
-.action{margin-top:18px;padding:16px 17px;border:1px solid var(--line);border-left:2px solid var(--accent)}.action strong{font-size:12px;font-weight:700}.action p{margin:6px 0 0;color:var(--muted);font-size:11px;line-height:1.55}
-.footer-note{margin-top:18px;color:#77746F;font-size:9px;line-height:1.55}
-.ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}
-@media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important}}
+:root{--bg:#07090B;--fg:#F1EEE8;--muted:#A7A49E;--line:#3A3F43;--accent:#C9B48A;--ok:#B8C9B1;--warn:#D6B879;--bad:#C9877D}
+*{box-sizing:border-box}html{scroll-behavior:smooth;background:var(--bg)}body{margin:0;background:var(--bg);color:var(--fg);font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;line-height:1.45;-webkit-font-smoothing:antialiased}main{width:min(1000px,100%);margin:auto;padding:26px 20px 60px}
+nav{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--line);padding:10px 0 14px;margin-bottom:36px}.logo{font-weight:700;letter-spacing:.12em;text-transform:uppercase;font-size:14px}.nav-links{display:flex;gap:22px}.nav-links a{color:var(--muted);text-decoration:none;font-size:10px;text-transform:uppercase;letter-spacing:.1em}.nav-links a:hover{color:var(--accent)}
+.hero{padding:4px 0 46px;border-bottom:1px solid var(--line)}.eyebrow,.section-kicker,.mini-kicker{color:var(--accent);font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.13em;margin:0 0 10px}.hero h1{margin:0;max-width:780px;font-size:clamp(38px,6vw,64px);line-height:.98;letter-spacing:-.05em;font-weight:700}.hero p{max-width:700px;margin:18px 0 0;color:var(--muted);font-size:15px;line-height:1.6}.hero-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:25px}.cta,.cta-secondary{display:inline-flex;align-items:center;justify-content:center;height:42px;padding:0 16px;border:1px solid var(--accent);font:700 10px Inter,system-ui,sans-serif;text-transform:uppercase;letter-spacing:.07em;text-decoration:none}.cta{background:var(--accent);color:#11110F}.cta-secondary{color:var(--fg);border-color:var(--line)}.cta-secondary:hover{border-color:var(--accent);color:var(--accent)}
+section{padding:40px 0;border-bottom:1px solid var(--line)}h2{font-size:25px;line-height:1.08;letter-spacing:-.03em;margin:0 0 10px}.section-intro{color:var(--muted);font-size:13px;max-width:700px;margin:0}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:22px}.card{border:1px solid var(--line);padding:19px;min-height:145px}.card strong{display:block;font-size:16px;margin:7px 0}.card span{color:var(--muted);font-size:12px;line-height:1.55}.metric{font-size:31px;font-weight:700;letter-spacing:-.04em;color:var(--fg)}.flow{display:flex;flex-wrap:wrap;gap:7px;align-items:center;margin-top:20px}.node{border:1px solid var(--line);padding:10px 13px;font-size:11px}.arrow{color:var(--accent);font-size:14px}.highlight{border:1px solid var(--accent);padding:22px;margin-top:22px}.highlight strong{font-size:16px}.highlight p{margin:7px 0 0;color:var(--muted);font-size:12px}
+.verify-section{padding-bottom:30px}.form-grid{display:grid;grid-template-columns:.72fr 1.28fr;gap:12px;margin-top:20px}.field label{display:block;color:var(--muted);font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.09em;margin:0 0 7px}input{width:100%;height:46px;background:transparent;color:var(--fg);border:1px solid var(--line);border-radius:0;padding:0 13px;font:500 13px Inter,system-ui,sans-serif;outline:none}input:focus{border-color:var(--accent);background:#0A0C0E}button{height:43px;margin-top:14px;border:1px solid var(--accent);border-radius:0;padding:0 18px;background:var(--accent);color:#11110F;font:700 10px Inter,system-ui,sans-serif;text-transform:uppercase;letter-spacing:.07em;cursor:pointer}button:hover{background:#D8C39A}button:disabled{opacity:.6;cursor:wait}.status-line{min-height:22px;margin-top:11px;color:var(--muted);font-size:10px}.loading{display:flex;align-items:center;gap:8px}.spinner{width:12px;height:12px;border:1px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:spin .75s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}.hidden{display:none!important}
+#result{padding-top:30px}.result-top{display:grid;grid-template-columns:138px 1fr;gap:28px;align-items:start}.score-wrap{border-top:1px solid var(--accent);padding-top:10px}.score-label{color:var(--accent);font-size:10px;text-transform:uppercase;letter-spacing:.11em;font-weight:600}.score{font-size:58px;line-height:.95;font-weight:700;letter-spacing:-.055em;margin-top:8px}.score-unit{color:var(--muted);font-size:10px;margin-top:6px}.result-title{margin:0 0 10px;font-size:25px;line-height:1.05;letter-spacing:-.025em;font-weight:700}.badge{display:inline-flex;align-items:center;padding:6px 9px;border:1px solid var(--line);font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.08em}.badge.ok{border-color:#657262;color:var(--ok)}.badge.warn{border-color:#776845;color:var(--warn)}.badge.bad{border-color:#704D49;color:var(--bad)}.disclaimer{margin:12px 0 0;color:var(--muted);font-size:11px;line-height:1.55;max-width:650px}.summary{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:30px}.summary-card{border:1px solid var(--line);padding:17px 18px;min-height:125px}.summary-kicker{color:var(--accent);font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.1em}.summary-value{font-size:16px;font-weight:700;margin-top:9px}.summary-text{color:var(--muted);font-size:11px;line-height:1.55;margin-top:6px}.section-title{font-size:19px;letter-spacing:-.02em;margin:34px 0 14px;font-weight:700}.status-grid{display:grid;grid-template-columns:repeat(3,1fr);border-top:1px solid var(--line);border-bottom:1px solid var(--line)}.status-card{padding:16px 15px 17px;border-right:1px solid var(--line)}.status-card:last-child{border-right:0}.status-card .label{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px}.status-card .value{font-size:12px;font-weight:600;line-height:1.45}.action{margin-top:18px;padding:16px 17px;border:1px solid var(--line);border-left:2px solid var(--accent)}.action strong{font-size:12px}.action p{margin:6px 0 0;color:var(--muted);font-size:11px;line-height:1.55}.footer-note{margin-top:18px;color:#77746F;font-size:9px;line-height:1.55}.ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}footer{padding-top:28px;color:#77746F;font-size:9px}
+@media(max-width:700px){main{padding:22px 16px 45px}.nav-links{gap:13px}.grid{grid-template-columns:1fr}.form-grid{grid-template-columns:1fr}.status-grid{grid-template-columns:1fr}.status-card{border-right:0;border-bottom:1px solid var(--line)}.status-card:last-child{border-bottom:0}.result-top{grid-template-columns:1fr;gap:20px}.summary{grid-template-columns:1fr}.tag{display:none}.hero h1{font-size:40px}}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*,*:before,*:after{animation:none!important}}
 </style>
 </head>
 <body>
 <main>
-  <nav>
-    <div class="logo">BifProtect</div>
-    <div class="tag">Qualification · Protection · Revenus</div>
-  </nav>
-
-  <header class="hero">
-    <p class="eyebrow">BifProtect</p>
-    <h1>La protection optimale de vos revenus</h1>
-  </header>
-
-  <section>
-    <div class="section-kicker">Lancer une qualification</div>
-    <div class="form-grid">
-      <div class="field"><label for="siren">SIREN</label><input id="siren" maxlength="9" inputmode="numeric" autocomplete="off" placeholder="9 chiffres"></div>
-      <div class="field"><label for="site">Site marchand</label><input id="site" value="https://www." placeholder="https://www.exemple.fr" autocomplete="url"></div>
-    </div>
-    <button id="go">Lancer la vérification</button>
-    <div id="msg" class="status-line"></div>
-  </section>
-
-  <section id="result" class="hidden"></section>
+<nav><div class="logo">BifProtect</div><div class="nav-links"><a href="#produit">Le produit</a><a href="#parcours">Le parcours</a><a href="#verification">Vérifier</a></div></nav>
+<header class="hero">
+<p class="eyebrow">BifProtect · Protection des revenus</p>
+<h1>La protection optimale de vos revenus.</h1>
+<p>Une protection pensée pour les marchands numériques : prévenir les risques, intervenir rapidement et préserver la continuité de votre activité.</p>
+<div class="hero-actions"><a class="cta" href="#verification">Vérifier mon site</a><a class="cta-secondary" href="#produit">Découvrir BifProtect</a></div>
+</header>
+<section id="produit"><p class="section-kicker">Le produit</p><h2>Une protection en trois briques.</h2><p class="section-intro">BifProtect associe qualification initiale, surveillance du risque et dispositif de réponse pour protéger l'activité là où elle génère ses revenus.</p>
+<div class="grid"><div class="card"><div class="metric">01</div><strong>Prévenir</strong><span>Contrôle automatisé avant activation, analyse du risque et surveillance récurrente.</span></div><div class="card"><div class="metric">02</div><strong>Intervenir</strong><span>Détection et qualification des signaux de risque pour déclencher rapidement l'action adaptée.</span></div><div class="card"><div class="metric">03</div><strong>Protéger</strong><span>Une couverture conçue pour limiter l'impact financier d'un incident sur votre activité.</span></div></div></section>
+<section id="parcours"><p class="section-kicker">Le parcours</p><h2>De la souscription à la protection.</h2><div class="flow"><div class="node">Marchand</div><div class="arrow">→</div><div class="node">Vérification</div><div class="arrow">→</div><div class="node">Activation</div><div class="arrow">→</div><div class="node">Veille + analyse</div><div class="arrow">→</div><div class="node">Alerte</div><div class="arrow">→</div><div class="node">Intervention</div><div class="arrow">→</div><div class="node">Protection</div></div><p class="section-intro" style="margin-top:18px">L'objectif : réduire la friction à la souscription tout en améliorant la sélection, le suivi et la capacité de réaction face au risque.</p></section>
+<section><p class="section-kicker">Pourquoi BifProtect</p><h2>Le risque ne doit pas attendre le sinistre.</h2><div class="grid"><div class="card"><strong>Qualification</strong><span>Identifier les principaux signaux de risque avant l'activation.</span></div><div class="card"><strong>Surveillance</strong><span>Réévaluer les signaux techniques et l'exposition dans le temps.</span></div><div class="card"><strong>Réactivité</strong><span>Prioriser les événements nécessitant une action préventive ou spécialisée.</span></div></div><div class="highlight"><strong>Une approche préventive de la protection.</strong><p>BifProtect cherche à intervenir le plus tôt possible : avant la compromission lorsque c'est possible, puis rapidement lorsque l'incident survient.</p></div></section>
+<section id="verification" class="verify-section"><p class="section-kicker">Vérification BifProtect</p><h2>Votre site est-il prêt à être protégé ?</h2><p class="section-intro">Renseignez le SIREN de l'entreprise et son site marchand. BifProtect vérifie l'identité, le statut juridique, le rattachement au domaine et les principaux signaux techniques.</p>
+<div class="form-grid"><div class="field"><label for="siren">SIREN</label><input id="siren" maxlength="9" inputmode="numeric" autocomplete="off" placeholder="9 chiffres"></div><div class="field"><label for="site">Site marchand</label><input id="site" value="https://www." placeholder="https://www.exemple.fr" autocomplete="url"></div></div><button id="go">Lancer la vérification</button><div id="msg" class="status-line"></div></section>
+<section id="result" class="hidden"></section>
+<footer>BifProtect · Protection des revenus · 2026</footer>
 </main>
 <script>
 const $=x=>document.getElementById(x);
@@ -111,7 +71,7 @@ $("go").onclick=async()=>{
 
   $("go").disabled=true;
   $("result").classList.add("hidden");
-  $("msg").innerHTML='<span class="loading"><span class="spinner"></span><span><strong>Analyse approfondie en cours…</strong> · Corrélation multi-sources et qualification automatisée</span></span>';
+  $("msg").innerHTML='<span class="loading"><span class="spinner"></span><span><strong>Vérification en cours…</strong> · Contrôles BifProtect</span></span>';
 
   try{
     const r=await fetch("/api/check",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({siren,site})});
@@ -193,5 +153,4 @@ $("go").onclick=async()=>{
   }finally{$("go").disabled=false}
 };
 </script>
-</body>
-</html>
+</body></html>
