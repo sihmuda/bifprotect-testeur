@@ -81,18 +81,19 @@ $("go").onclick=async()=>{
     const techIssues=Number(x.technical_issue_count||0);
     const reserve=Boolean(x.justificatif_required);
     const blocked=Boolean(x.automated_access_blocked);
+    const coverage=Number(x.technical_coverage ?? 100);
 
     let technicalValue;
     let technicalText;
     if(blocked && techIssues===0){
       technicalValue="Contrôle technique partiellement mesurable";
-      technicalText="L'accès automatisé est protégé. Les contrôles non mesurables ne sont pas pénalisés.";
+      technicalText=`L'accès automatisé est protégé. ${esc(coverage)} % des contrôles techniques sont mesurables depuis notre point de contrôle.`;
     }else if(techIssues===0){
       technicalValue="Aucun écart détecté";
-      technicalText="Les contrôles techniques mesurés ne présentent pas d'écart dans le périmètre analysé.";
+      technicalText=`Les contrôles techniques mesurés ne présentent pas d'écart dans le périmètre analysé. Couverture : ${esc(coverage)} %.`;
     }else{
       technicalValue=`${techIssues} sujet${techIssues>1?'s':''} technique${techIssues>1?'s':''} à corriger`;
-      technicalText="Les écarts sont intégrés au score. Leur détail technique n'est pas affiché dans cette synthèse.";
+      technicalText=`Les écarts sont intégrés au score. Couverture des contrôles : ${esc(coverage)} %.`;
     }
 
     let docValue,docText;
@@ -113,7 +114,7 @@ $("go").onclick=async()=>{
         <div class="score-wrap">
           <div class="score-label">Score BifProtect</div>
           <div class="score">${x.technical_score_available===false?'—':esc(x.score)}</div>
-          <div class="score-unit">Indice de compatibilité</div>
+          <div class="score-unit">${x.technical_score_available===false?`Couverture ${esc(coverage)} %`:`Indice de compatibilité`}</div>
         </div>
         <div>
           <h2 class="result-title">Qualification du site</h2>
