@@ -33,3 +33,10 @@ La synthèse utilisateur n'affiche pas la liste brute des contrôles techniques.
 
 
 Optimisation V3.8 : vérification du rattachement domaine plus ciblée et parallélisée, sans exploration automatique des sous-domaines arbitraires ni sitemap.
+
+
+### V3.14
+- Les protections anti-bot sont neutres : elles ne sont ni pénalisées ni transformées en justificatif documentaire.
+- Les contrôles HTTP non mesurables restent explicitement hors pénalité.
+- Les redirections officielles sont suivies sur plusieurs hops et peuvent établir le rattachement d'un domaine initial à un domaine de marque cohérent avec la société.
+- Le diagnostic anti-bot reste disponible dans la réponse technique, mais n'est plus affiché comme une anomalie dans la synthèse utilisateur.

@@ -76,36 +76,46 @@ class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
 NO_REDIRECT_OPENER = urllib.request.build_opener(NoRedirectHandler())
 
 
-def inspect_redirect(url):
-    """Inspecte uniquement le premier redirect sans le suivre automatiquement.
+def inspect_redirect(url, max_hops=4):
+    """Suit les redirections HTTP sans charger les pages finales.
 
-    Permet d'établir une chaîne de rattachement : domaine saisi -> domaine cible.
-    La cible est validée comme URL HTTPS et son IP doit être publique.
+    La chaîne est conservée même lorsque le domaine final est différent du
+    domaine initial. Cela permet de qualifier proprement un alias officiel
+    (ex. cdiscount.fr -> cdiscount.com) sans autoriser une exploration
+    arbitraire de domaines tiers.
     """
-    parsed = validate_site_url(url)
-    public_ips(parsed.hostname)
-    headers = {
-        "User-Agent": LEGAL_USER_AGENT,
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.7",
-        "Referer": f"https://{parsed.hostname}/",
-    }
-    req = urllib.request.Request(url, headers=headers, method="GET")
-    try:
-        with NO_REDIRECT_OPENER.open(req, timeout=TIMEOUT) as response:
-            return None
-    except urllib.error.HTTPError as exc:
-        if exc.code in (301, 302, 303, 307, 308):
+    current = url
+    chain = []
+    for _ in range(max_hops):
+        parsed = validate_site_url(current)
+        public_ips(parsed.hostname)
+        headers = {
+            "User-Agent": LEGAL_USER_AGENT,
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.7",
+            "Referer": f"https://{parsed.hostname}/",
+        }
+        req = urllib.request.Request(current, headers=headers, method="GET")
+        try:
+            with NO_REDIRECT_OPENER.open(req, timeout=TIMEOUT) as response:
+                return chain
+        except urllib.error.HTTPError as exc:
+            if exc.code not in (301, 302, 303, 307, 308):
+                return chain
             location = exc.headers.get("Location")
             if not location:
-                return None
-            target = urljoin(url, location)
+                return chain
+            target = urljoin(current, location)
             target_parsed = validate_site_url(target)
             public_ips(target_parsed.hostname)
-            return {"from": url, "to": target, "status_code": exc.code}
-        return None
-    except Exception:
-        return None
+            hop = {"from": current, "to": target, "status_code": exc.code}
+            chain.append(hop)
+            if target in {h["from"] for h in chain}:
+                return chain
+            current = target
+        except Exception:
+            return chain
+    return chain
 
 
 def open_safe(url, method="GET", user_agent=None):
@@ -425,15 +435,33 @@ def extract_site_evidence(url, siren, company_name):
         # principal de la marque (ex. cdiscount.fr -> cdiscount.com). On conserve
         # cette chaîne au lieu de perdre l'information dans le gestionnaire HTTP.
         try:
-            hop = inspect_redirect(url)
-            if hop:
-                redirect_chain.append(hop)
-                result["redirect_chain"].append(hop)
+            hops = inspect_redirect(url)
+            redirect_chain.extend(hops)
+            result["redirect_chain"].extend(hops)
+            for hop in hops:
                 result["evidence"].append(
                     f"Redirection {hop['status_code']} : {urlparse(hop['from']).hostname} → {urlparse(hop['to']).hostname}"
                 )
         except Exception:
             pass
+
+        # Une redirection HTTP vers un domaine de marque cohérent avec la
+        # dénomination officielle constitue une preuve de rattachement du
+        # domaine initial. On ne demande pas l'accès au contenu du domaine
+        # final pour établir cette relation.
+        company_tokens_for_redirect = name_tokens(company_name)
+        for hop in redirect_chain:
+            target_host = (urlparse(hop["to"]).hostname or "").lower().strip(".")
+            target_org = organizational_domain(target_host)
+            target_label = target_host.split(".")[0]
+            target_tokens = name_tokens(target_label)
+            if target_host and target_org != base_org and target_tokens & company_tokens_for_redirect:
+                result["direct_proof"] = True
+                result["score"] = 100
+                result["evidence"].append(
+                    f"Le domaine initial redirige officiellement vers {target_host}, domaine cohérent avec la dénomination de l'entreprise."
+                )
+                break
 
         legal_terms = ("mentions", "mention-legale", "mentions-legales", "legal", "legal-notice",
                        "cgv", "conditions", "terms", "impressum", "qui-sommes", "a-propos",
@@ -504,7 +532,24 @@ def extract_site_evidence(url, siren, company_name):
             try:
                 with open_safe(candidate,"GET", user_agent=LEGAL_USER_AGENT) as response:
                     final_url=response.geturl()
-                    if not allowed(final_url): return False
+                    final_host=(urlparse(final_url).hostname or "").lower().strip(".")
+                    redirect_target_hosts={
+                        (urlparse(h["to"]).hostname or "").lower().strip(".")
+                        for h in redirect_chain
+                    }
+                    if not allowed(final_url) and final_host not in redirect_target_hosts:
+                        final_label=final_host.split(".")[0]
+                        final_tokens=name_tokens(final_label)
+                        if not (final_tokens & name_tokens(company_name)):
+                            return False
+                        # Le client HTTP a suivi une redirection vers un domaine
+                        # de marque cohérent ; on la conserve comme preuve de
+                        # rattachement, sans explorer ce domaine comme un site tiers.
+                        result["direct_proof"] = True
+                        result["score"] = 100
+                        result["evidence"].append(
+                            f"Le domaine a redirigé vers {final_host}, domaine cohérent avec la dénomination officielle de l'entreprise."
+                        )
                     ctype=(response.headers.get("Content-Type") or "").lower()
                     raw=response.read(800_000)
                     result["pages_checked"].append(final_url)
@@ -584,31 +629,21 @@ def extract_site_evidence(url, siren, company_name):
         company_tokens=name_tokens(company_name)
         overlap=company_tokens & domain_tokens
 
-        # Preuve renforcée : si le domaine final d'une redirection correspond
-        # explicitement à un élément de la dénomination officielle retournée par
-        # Recherche Entreprises (ex. CDISCOUNT.COM), la chaîne domaine -> domaine
-        # de marque est directement rattachée à l'identité SIREN.
-        redirect_verified = False
-        for hop in redirect_chain:
-            target_host = (urlparse(hop["to"]).hostname or "").lower().strip(".")
-            target_label = target_host.split(".")[0]
-            target_tokens = name_tokens(target_label)
-            if target_label and target_label in normalize_name(company_name).split():
-                redirect_verified = True
-                result["direct_proof"] = True
-                result["score"] = 100
-                result["evidence"].append(
-                    f"Le domaine cible {target_host} est explicitement associé à la dénomination officielle de l'entreprise."
-                )
-                break
-            if target_tokens and target_tokens & company_tokens:
-                redirect_verified = True
-                result["direct_proof"] = True
-                result["score"] = 100
-                result["evidence"].append(
-                    f"Le domaine cible {target_host} partage un identifiant de marque avec la dénomination officielle de l'entreprise."
-                )
-                break
+        # La chaîne de redirection a déjà été validée au début de l'analyse.
+        # Si le domaine cible partage un identifiant de marque avec la
+        # dénomination officielle, le domaine initial est directement rattaché.
+        if redirect_chain and not result["direct_proof"]:
+            for hop in redirect_chain:
+                target_host = (urlparse(hop["to"]).hostname or "").lower().strip(".")
+                target_label = target_host.split(".")[0]
+                target_tokens = name_tokens(target_label)
+                if target_tokens & company_tokens:
+                    result["direct_proof"] = True
+                    result["score"] = 100
+                    result["evidence"].append(
+                        f"Le domaine cible {target_host} partage un identifiant de marque avec la dénomination officielle de l'entreprise."
+                    )
+                    break
 
         if overlap:
             result["score"]=max(result["score"],min(75,40+10*len(overlap)))
@@ -804,8 +839,11 @@ def calculate_score(company, legal, domain_link, dns, http, tls):
     else:
         technical_complementary.append("Les contrôles HTTP n'ont pas pu être mesurés.")
 
-    technical_score_available = not access_blocked
-    score = max(0, min(100, score)) if technical_score_available else None
+    # Un accès automatisé protégé est neutre : on ne pénalise ni le score ni
+    # la décision et on ne crée pas de justificatif documentaire. Le score
+    # reste calculé sur les contrôles effectivement mesurables.
+    technical_score_available = True
+    score = max(0, min(100, score))
     technical_issue_count = len(reasons)
     technical_unknown_count = 1 if access_blocked else 0
 
@@ -815,9 +853,6 @@ def calculate_score(company, legal, domain_link, dns, http, tls):
     if blockers:
         decision = "NON_ELIGIBLE"
         decision_label = "NON ÉLIGIBLE"
-    elif not technical_score_available:
-        decision = "CONTROLE_COMPLEMENTAIRE"
-        decision_label = "CONTRÔLE COMPLÉMENTAIRE"
     elif score < 60:
         decision = "CONTROLE_COMPLEMENTAIRE"
         decision_label = "CONTRÔLE COMPLÉMENTAIRE"
@@ -848,7 +883,7 @@ def calculate_score(company, legal, domain_link, dns, http, tls):
         "automated_access_blocked": access_blocked,
         "technical_measurement": "PARTIAL" if access_blocked else ("MEASURED" if http_measured else "LIMITED"),
         "technical_score_available": technical_score_available,
-        "version_bareme": "3.13",
+        "version_bareme": "3.14",
     }
 
 
@@ -863,7 +898,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/health":
-            self.send_json({"status": "ok", "version": "3.13"})
+            self.send_json({"status": "ok", "version": "3.14"})
             return
         if self.path in ("/", "/index.html"):
             body = (Path("static") / "index.html").read_bytes()
