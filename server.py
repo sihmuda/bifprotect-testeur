@@ -808,7 +808,7 @@ def calculate_score(company, legal, domain_link, dns, http, tls):
     if domain_link.get("status") != "VERIFIED":
         complementary.append("Le lien entre le domaine et le SIREN n'est pas établi par une preuve juridique directe : justificatif requis avant validation définitive.")
 
-    # Un signal non mesurable ne doit jamais être traité comme une non-conformité.
+    # DNS/TLS sont des contrôles indépendants de la page HTML.
     if not dns.get("ipv4"):
         score -= 20
         reasons.append("DNS / IPv4 non résolu")
@@ -824,6 +824,11 @@ def calculate_score(company, legal, domain_link, dns, http, tls):
         score -= 20
         reasons.append("Certificat TLS non validé")
 
+    # IMPORTANT : un header explicitement absent n'est pénalisé QUE lorsque la
+    # réponse HTTP a réellement été mesurée. Un challenge anti-bot ne permet
+    # pas de conclure que les headers sont absents.
+    measurable_http_controls = 0
+    conform_http_controls = 0
     if http_measured:
         for header, penalty, reason in [
             ("strict-transport-security", 8, "HSTS absent"),
@@ -831,25 +836,39 @@ def calculate_score(company, legal, domain_link, dns, http, tls):
             ("x-content-type-options", 4, "X-Content-Type-Options absent"),
             ("x-frame-options", 4, "X-Frame-Options absent"),
         ]:
-            if header not in http.get("security_headers", {}):
+            measurable_http_controls += 1
+            if header in http.get("security_headers", {}):
+                conform_http_controls += 1
+            else:
                 score -= penalty
                 reasons.append(reason)
     elif access_blocked:
-        technical_complementary.append("L'accès automatisé au site est protégé ; les en-têtes HTTP n'ont pas pu être mesurés depuis notre point de contrôle.")
+        # Neutre : aucune pénalité et surtout aucune conclusion positive.
+        # L'UI reçoit un score technique non disponible + une couverture partielle.
+        technical_complementary.append("Accès automatisé protégé : certains contrôles HTTP n'ont pas pu être mesurés.")
     else:
         technical_complementary.append("Les contrôles HTTP n'ont pas pu être mesurés.")
 
-    # Un accès automatisé protégé est neutre : on ne pénalise ni le score ni
-    # la décision et on ne crée pas de justificatif documentaire. Le score
-    # reste calculé sur les contrôles effectivement mesurables.
-    technical_score_available = True
     score = max(0, min(100, score))
-    technical_issue_count = len(reasons)
-    technical_unknown_count = 1 if access_blocked else 0
 
-    # Les blocages juridiques priment. Une mesure technique incomplète ne doit
-    # jamais être transformée en score artificiel : elle déclenche un contrôle
-    # complémentaire sans être assimilée à une défaillance du site.
+    # Couverture : proportion des contrôles techniques applicables réellement
+    # mesurés. Les contrôles bloqués par anti-bot sont inconnus, pas conformes.
+    total_technical_controls = 6  # DNS IPv4, TLS, + 4 headers HTTP
+    measured_technical_controls = 0
+    measured_technical_controls += 1 if dns.get("ipv4") else 0
+    measured_technical_controls += 1 if tls.get("valid") else 0
+    measured_technical_controls += measurable_http_controls
+    coverage = round((measured_technical_controls / total_technical_controls) * 100)
+    measurement_complete = measured_technical_controls == total_technical_controls
+
+    # Le score chiffré n'est affiché que lorsque le périmètre technique est
+    # entièrement mesurable. Sinon, le score brut reste disponible pour la
+    # décision/audit, mais l'interface affiche "—" avec la couverture.
+    display_score = score if measurement_complete else None
+
+    technical_issue_count = len(reasons)
+    technical_unknown_count = total_technical_controls - measured_technical_controls
+
     if blockers:
         decision = "NON_ELIGIBLE"
         decision_label = "NON ÉLIGIBLE"
@@ -868,7 +887,8 @@ def calculate_score(company, legal, domain_link, dns, http, tls):
 
     reasons.extend(complementary)
     return {
-        "score": score,
+        "score": display_score,
+        "score_raw": score,
         "decision": decision,
         "decision_label": decision_label,
         "can_subscribe": not bool(blockers),
@@ -881,9 +901,12 @@ def calculate_score(company, legal, domain_link, dns, http, tls):
         "technical_issue_count": technical_issue_count,
         "technical_unknown_count": technical_unknown_count,
         "automated_access_blocked": access_blocked,
-        "technical_measurement": "PARTIAL" if access_blocked else ("MEASURED" if http_measured else "LIMITED"),
-        "technical_score_available": technical_score_available,
-        "version_bareme": "3.14",
+        "technical_measurement": "MEASURED" if measurement_complete else ("PARTIAL" if measured_technical_controls else "LIMITED"),
+        "technical_score_available": measurement_complete,
+        "technical_coverage": coverage,
+        "measured_technical_controls": measured_technical_controls,
+        "total_technical_controls": total_technical_controls,
+        "version_bareme": "3.15",
     }
 
 
@@ -964,5 +987,5 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    print(f"BifProtect Testeur V3.12 — écoute sur {HOST}:{PORT}")
+    print(f"BifProtect Testeur V3.15 — écoute sur {HOST}:{PORT}")
     ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()
