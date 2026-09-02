@@ -14,8 +14,8 @@ table{width:100%;border-collapse:collapse;margin-top:15px}td,th{padding:11px 7px
 .section-title{margin:28px 0 8px;font-size:17px}.decision-box{padding:15px;border-radius:12px;background:#081522;margin-top:15px}.small{font-size:11px;color:var(--muted)}
 </style></head>
 <body><main>
-<div class="brand">BifProtect by Grisbiz</div><div class="sub">Testeur de qualification entreprise · domaine · sécurité — V3.1</div>
-<section class="card"><div class="grid"><div><label for="siren">SIREN</label><input id="siren" maxlength="9" inputmode="numeric" placeholder="9 chiffres"></div><div><label for="site">Site marchand</label><input id="site" placeholder="https://www.exemple.fr"></div></div><button id="go">Lancer le contrôle</button><div id="msg" class="note"></div></section>
+<div class="brand">BifProtect by Grisbiz</div><div class="sub">Testeur de qualification entreprise · domaine · sécurité — V3.2</div>
+<section class="card"><div class="grid"><div><label for="siren">SIREN</label><input id="siren" maxlength="9" inputmode="numeric" placeholder="9 chiffres"></div><div><label for="site">Site marchand</label><input id="site" value="https://www." placeholder="https://www.exemple.fr" autocomplete="url"></div></div><button id="go">Lancer le contrôle</button><div id="msg" class="note"></div></section>
 <section id="result" class="card hidden"></section></main>
 <script>
 const $=x=>document.getElementById(x);const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#039;"}[c]));
@@ -24,7 +24,7 @@ function badge(d){if(d==="ELIGIBLE")return'<span class="badge ok">ÉLIGIBLE</spa
 function statusLabel(s){return s==="VERIFIED"?'<span class="ok">Vérifié</span>':s==="PROBABLE"?'<span class="warn">Probable</span>':'<span class="bad">Non établi</span>'}
 function legalText(l){if(!l.available)return"Non vérifiable automatiquement";return l.radiation?"Radiation signalée":l.liquidation?"Liquidation judiciaire signalée":l.redressement?"Redressement judiciaire signalé":l.sauvegarde?"Sauvegarde signalée":"Aucune alerte BODACC détectée"}
 
-$("go").onclick=async()=>{const s=$("siren").value.trim(),site=$("site").value.trim();if(!/^\d{9}$/.test(s)){alert("SIREN invalide : 9 chiffres.");return}if(!/^https:\/\//i.test(site)){alert("L'URL doit commencer par https://");return}
+$("go").onclick=async()=>{const s=$("siren").value.trim();let site=$("site").value.trim();if(!/^\d{9}$/.test(s)){alert("SIREN invalide : 9 chiffres.");return}if(!/^https?:\/\//i.test(site)){site="https://www."+site.replace(/^\/*/,"")}if(/^https?:\/\/www\.$/i.test(site)){alert("Saisissez le domaine du site marchand.");return}
 $("go").disabled=true;$("msg").textContent="Vérification entreprise, statut juridique, rattachement du domaine et sécurité…";$("result").classList.add("hidden");
 try{const r=await fetch("/api/check",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({siren:s,site})});const d=await r.json();if(!r.ok)throw Error(d.detail||"Erreur");const c=d.controls,x=d.decision,i=d.identity,l=d.legal,dl=d.domain_link;
 const identityRows=[
