@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import html
+import io
 import ipaddress
 import json
 import os
@@ -16,7 +17,7 @@ from urllib.parse import quote, urljoin, urlparse
 HOST = "0.0.0.0"
 PORT = int(os.environ.get("PORT", "10000"))
 TIMEOUT = 10
-USER_AGENT = "BifProtect-Testeur/2.6"
+USER_AGENT = "BifProtect-Testeur/2.7"
 
 SEARCH_API = "https://recherche-entreprises.api.gouv.fr/search?q="
 BODACC_API = "https://bodacc-datadila.opendatasoft.com/api/explore/v2.1/catalog/datasets/annonces-commerciales/records"
@@ -332,10 +333,27 @@ class TextExtractor(HTMLParser):
 
 
 def _contains_registration(raw, siren, siret):
-    """Détecte un SIREN/SIRET avec ou sans espaces, dans HTML/PDF/texte brut."""
+    """Détecte un SIREN/SIRET dans HTML, texte brut ou PDF.
+
+    Les mentions légales de certains sites sont servies uniquement en PDF.
+    Une simple recherche dans les octets du PDF ne suffit pas lorsque le texte
+    est compressé : on extrait donc le texte avec pypdf avant la recherche.
+    """
     if not raw:
         return None
-    text = raw.decode("latin-1", errors="ignore") if isinstance(raw, (bytes, bytearray)) else str(raw)
+    if isinstance(raw, (bytes, bytearray)):
+        blob = bytes(raw)
+        if blob.startswith(b"%PDF"):
+            try:
+                from pypdf import PdfReader
+                reader = PdfReader(io.BytesIO(blob))
+                text = "\n".join((page.extract_text() or "") for page in reader.pages)
+            except Exception:
+                text = blob.decode("latin-1", errors="ignore")
+        else:
+            text = blob.decode("latin-1", errors="ignore")
+    else:
+        text = str(raw)
     if siret:
         compact = re.sub(r"\D", "", text)
         if siret in compact:

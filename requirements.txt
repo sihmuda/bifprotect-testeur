@@ -1,2 +1,1 @@
-# BifProtect V2.5 : aucune dépendance Python externe.
-# Bibliothèque standard uniquement.
+pypdf>=5.0,<7
