@@ -17,7 +17,7 @@ from urllib.parse import quote, urljoin, urlparse
 HOST = "0.0.0.0"
 PORT = int(os.environ.get("PORT", "10000"))
 TIMEOUT = 10
-USER_AGENT = "BifProtect-Testeur/2.7"
+USER_AGENT = "BifProtect-Testeur/2.9"
 
 SEARCH_API = "https://recherche-entreprises.api.gouv.fr/search?q="
 BODACC_API = "https://bodacc-datadila.opendatasoft.com/api/explore/v2.1/catalog/datasets/annonces-commerciales/records"
@@ -91,6 +91,37 @@ def normalize_name(value):
     value = normalize_text(value)
     value = re.sub(r"[^a-z0-9à-ÿ]+", " ", value)
     return re.sub(r"\s+", " ", value).strip()
+
+
+def organizational_domain(hostname):
+    """Retourne une approximation prudente du domaine organisationnel (eTLD+1).
+
+    BifProtect doit pouvoir suivre www et les sous-domaines officiels (ex.
+    marketplace.cdiscount.com) sans considérer un domaine tiers comme faisant
+    partie du site. Pour les suffixes composés courants, on conserve 3 labels.
+    """
+    host = (hostname or "").strip(".").lower()
+    try:
+        ipaddress.ip_address(host)
+        return host
+    except ValueError:
+        pass
+    labels = [x for x in host.split(".") if x]
+    if len(labels) < 2:
+        return host
+    compound_suffixes = {
+        "co.uk", "org.uk", "ac.uk", "gov.uk", "com.au", "net.au", "org.au",
+        "co.nz", "net.nz", "org.nz", "co.jp", "ne.jp", "com.br", "com.mx",
+        "com.tr", "com.sg", "com.hk", "co.za", "co.kr", "co.in", "co.il"
+    }
+    suffix = ".".join(labels[-2:])
+    if suffix in compound_suffixes and len(labels) >= 3:
+        return ".".join(labels[-3:])
+    return ".".join(labels[-2:])
+
+
+def same_organizational_domain(host_a, host_b):
+    return organizational_domain(host_a) == organizational_domain(host_b)
 
 
 def name_tokens(value):
@@ -325,7 +356,12 @@ def _contains_registration(raw, siren):
 
 
 def extract_site_evidence(url, siren, company_name):
-    """Évalue le lien domaine ↔ entreprise, en recherchant aussi les pages légales découvertes dans le site."""
+    """Établit le rattachement domaine ↔ SIREN.
+
+    Une preuve directe est recherchée sur le domaine organisationnel du site,
+    y compris www et les sous-domaines officiels. Les pages HTML, PDF, liens
+    légaux et sitemaps sont inspectés sans suivre des domaines tiers.
+    """
     result = {
         "status": "UNKNOWN",
         "label": "Non déterminé",
@@ -337,41 +373,73 @@ def extract_site_evidence(url, siren, company_name):
     }
     try:
         base = validate_site_url(url)
+        base_org = organizational_domain(base.hostname)
         root = f"{base.scheme}://{base.netloc}"
-        candidates = [
-            url,
-            urljoin(root + "/", "mentions-legales"),
-            urljoin(root + "/", "mentions-legales/"),
-            urljoin(root + "/", "legal-notice"),
-            urljoin(root + "/", "cgv"),
-            urljoin(root + "/", "conditions-generales-de-vente"),
-            urljoin(root + "/", "contact"),
+        legal_terms = (
+            "mentions", "mention-legale", "mentions-legales", "legal", "legal-notice",
+            "cgv", "conditions", "terms", "impressum", "qui-sommes", "a-propos",
+            "about", "rgpd", "privacy", "confidentialite", "cookies", "company"
+        )
+        direct_paths = [
+            "mentions-legales", "mentions-legales/", "mentions_legales", "mentions_legales/",
+            "legal-notice", "legal-notice/", "legal", "legal/", "cgv", "cgv/",
+            "conditions-generales-de-vente", "conditions-generales-de-vente/",
+            "contact", "a-propos", "about", "resources/RWD/other/mentions_legales.pdf",
+            "mentions_legales.pdf", "mentions-legales.pdf", "legal-notice.pdf"
         ]
+        candidates = [url] + [urljoin(root + "/", path) for path in direct_paths]
         seen = set()
         combined = []
         discovered = []
+        sitemap_urls = []
 
-        def add_candidate(candidate):
+        def allowed(candidate):
+            try:
+                p = urlparse(candidate)
+                return p.scheme.lower() == "https" and same_organizational_domain(p.hostname, base_org)
+            except Exception:
+                return False
+
+        def add_candidate(candidate, force=False):
             if not candidate:
                 return
-            p = urlparse(candidate)
-            if p.netloc != base.netloc:
+            try:
+                p = urlparse(candidate)
+                if not allowed(candidate):
+                    return
+                low = candidate.lower()
+                path_low = p.path.lower()
+                is_pdf = path_low.endswith(".pdf") or ".pdf?" in low
+                is_legal = force or is_pdf or any(k in low for k in legal_terms)
+                if is_legal and candidate not in seen:
+                    discovered.append(candidate)
+            except Exception:
                 return
-            # Ne suivre automatiquement que des liens légaux/institutionnels du même domaine.
-            low = candidate.lower()
-            if any(k in low for k in ("mentions", "legal", "cgv", "conditions", "terms", "impressum", "qui-sommes", "a-propos")):
-                discovered.append(candidate)
 
-        # Première passe : pages connues + liens légaux présents sur la page d'accueil.
-        initial = list(candidates)
-        for candidate in initial:
-            p = urlparse(candidate)
-            if p.netloc != base.netloc or candidate in seen:
-                continue
+        def parse_html(raw, final_url):
+            parser = TextExtractor()
+            parser.feed(raw.decode("utf-8", errors="ignore"))
+            combined.append(normalize_text(" ".join(parser.parts)))
+            for href in parser.links:
+                try:
+                    candidate = urljoin(final_url, href)
+                    # Tout lien PDF ou page juridique du même domaine organisationnel
+                    # est candidat, y compris sur un sous-domaine officiel.
+                    add_candidate(candidate)
+                except Exception:
+                    pass
+
+        def check_candidate(candidate):
+            if candidate in seen:
+                return
+            if not allowed(candidate):
+                return
             seen.add(candidate)
             try:
                 with open_safe(candidate, "GET") as response:
                     final_url = response.geturl()
+                    if not allowed(final_url):
+                        return
                     content_type = (response.headers.get("Content-Type") or "").lower()
                     raw = response.read(900_000)
                     result["pages_checked"].append(final_url)
@@ -380,42 +448,57 @@ def extract_site_evidence(url, siren, company_name):
                         result["direct_proof"] = True
                         result["score"] = 100
                         result["evidence"].append(f"{proof} retrouvé sur {final_url}")
-                    if "html" in content_type or candidate == url:
-                        parser = TextExtractor()
-                        parser.feed(raw.decode("utf-8", errors="ignore"))
-                        text = normalize_text(" ".join(parser.parts))
-                        combined.append(text)
-                        for href in parser.links:
-                            try:
-                                add_candidate(urljoin(final_url, href))
-                            except Exception:
-                                pass
+                    if "html" in content_type or final_url.lower().split("?", 1)[0].endswith((".html", ".htm", "/")):
+                        parse_html(raw, final_url)
             except Exception:
-                continue
+                return
 
-        # Deuxième passe : suivre quelques pages légales réellement découvertes.
-        for candidate in discovered[:12]:
-            p = urlparse(candidate)
-            if p.netloc != base.netloc or candidate in seen:
-                continue
-            seen.add(candidate)
+        # Première passe : page saisie + variantes légales connues.
+        for candidate in candidates:
+            check_candidate(candidate)
+
+        # Deuxième passe : liens légaux/PDF découverts sur les pages du même domaine.
+        for candidate in discovered[:40]:
+            check_candidate(candidate)
+            if result["direct_proof"]:
+                break
+
+        # Troisième passe : robots.txt et sitemaps. Cela permet de retrouver une
+        # page légale/PDF non liée directement depuis la page d'accueil.
+        robots = urljoin(root + "/", "robots.txt")
+        try:
+            with open_safe(robots, "GET") as response:
+                raw = response.read(200_000)
+                text = raw.decode("utf-8", errors="ignore")
+                for line in text.splitlines():
+                    if line.lower().startswith("sitemap:"):
+                        sm = line.split(":", 1)[1].strip()
+                        if allowed(sm):
+                            sitemap_urls.append(sm)
+        except Exception:
+            pass
+        if not sitemap_urls:
+            sitemap_urls.append(urljoin(root + "/", "sitemap.xml"))
+
+        for sm in sitemap_urls[:3]:
             try:
-                with open_safe(candidate, "GET") as response:
-                    final_url = response.geturl()
-                    raw = response.read(900_000)
-                    result["pages_checked"].append(final_url)
-                    proof = _contains_registration(raw, siren)
-                    if proof:
-                        result["direct_proof"] = True
-                        result["score"] = 100
-                        result["evidence"].append(f"{proof} retrouvé sur {final_url}")
-                    content_type = (response.headers.get("Content-Type") or "").lower()
-                    if "html" in content_type:
-                        parser = TextExtractor()
-                        parser.feed(raw.decode("utf-8", errors="ignore"))
-                        combined.append(normalize_text(" ".join(parser.parts)))
+                if not allowed(sm):
+                    continue
+                with open_safe(sm, "GET") as response:
+                    raw = response.read(800_000)
+                    xml = raw.decode("utf-8", errors="ignore")
+                    for loc in re.findall(r"<loc>\s*(.*?)\s*</loc>", xml, flags=re.I | re.S):
+                        loc = html.unescape(loc.strip())
+                        if allowed(loc):
+                            low = loc.lower()
+                            if any(k in low for k in legal_terms) or low.endswith(".pdf"):
+                                add_candidate(loc, force=True)
             except Exception:
                 continue
+        for candidate in discovered[:60]:
+            check_candidate(candidate)
+            if result["direct_proof"]:
+                break
 
         corpus = normalize_text(" ".join(combined))
         domain_tokens = name_tokens(base.hostname.replace("www.", "").split(".")[0])
@@ -588,7 +671,7 @@ def calculate_score(company, legal, domain_link, dns, http, tls):
         "blockers": blockers,
         "complementary": complementary,
         "reasons": reasons,
-        "version_bareme": "2.8",
+        "version_bareme": "2.9",
     }
 
 
@@ -603,7 +686,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/health":
-            self.send_json({"status": "ok", "version": "2.8"})
+            self.send_json({"status": "ok", "version": "2.9"})
             return
         if self.path in ("/", "/index.html"):
             body = (Path("static") / "index.html").read_bytes()
@@ -653,5 +736,5 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    print(f"BifProtect Testeur V2.8 — écoute sur {HOST}:{PORT}")
+    print(f"BifProtect Testeur V2.9 — écoute sur {HOST}:{PORT}")
     ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()
