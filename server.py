@@ -18,7 +18,10 @@ from urllib.parse import quote, urljoin, urlparse
 HOST = "0.0.0.0"
 PORT = int(os.environ.get("PORT", "10000"))
 TIMEOUT = 4
-USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36 BifProtect/3.10"
+MAX_PAGE_BYTES = 1_500_000
+# UA navigateur standard pour éviter de transformer le contrôle en signature de bot.
+USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+LEGAL_USER_AGENT = USER_AGENT
 
 SEARCH_API = "https://recherche-entreprises.api.gouv.fr/search?q="
 BODACC_API = "https://bodacc-datadila.opendatasoft.com/api/explore/v2.1/catalog/datasets/annonces-commerciales/records"
@@ -67,13 +70,14 @@ class SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
 SAFE_OPENER = urllib.request.build_opener(SafeRedirectHandler())
 
 
-def open_safe(url, method="GET"):
+def open_safe(url, method="GET", user_agent=None):
     parsed = validate_site_url(url)
     public_ips(parsed.hostname)
     headers = {
-        "User-Agent": USER_AGENT,
+        "User-Agent": user_agent or USER_AGENT,
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,application/pdf;q=0.8,*/*;q=0.7",
         "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.7",
+        "Referer": f"https://{parsed.hostname}/",
     }
     req = urllib.request.Request(url, headers=headers, method=method)
     return SAFE_OPENER.open(req, timeout=TIMEOUT)
@@ -444,7 +448,7 @@ def extract_site_evidence(url, siren, company_name):
             if candidate in seen or not allowed(candidate): return False
             seen.add(candidate)
             try:
-                with open_safe(candidate,"GET") as response:
+                with open_safe(candidate,"GET", user_agent=LEGAL_USER_AGENT) as response:
                     final_url=response.geturl()
                     if not allowed(final_url): return False
                     ctype=(response.headers.get("Content-Type") or "").lower()
@@ -763,7 +767,7 @@ def calculate_score(company, legal, domain_link, dns, http, tls):
         "automated_access_blocked": access_blocked,
         "technical_measurement": "PARTIAL" if access_blocked else ("MEASURED" if http_measured else "LIMITED"),
         "technical_score_available": technical_score_available,
-        "version_bareme": "3.11",
+        "version_bareme": "3.12",
     }
 
 
@@ -778,7 +782,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/health":
-            self.send_json({"status": "ok", "version": "3.10"})
+            self.send_json({"status": "ok", "version": "3.12"})
             return
         if self.path in ("/", "/index.html"):
             body = (Path("static") / "index.html").read_bytes()
@@ -844,5 +848,5 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    print(f"BifProtect Testeur V3.10 — écoute sur {HOST}:{PORT}")
+    print(f"BifProtect Testeur V3.12 — écoute sur {HOST}:{PORT}")
     ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()
