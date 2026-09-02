@@ -101,111 +101,71 @@ def name_tokens(value):
     return {t for t in normalize_name(value).split() if len(t) >= 4 and t not in stop}
 
 
-# --- Identité entreprise / établissement ---
+# --- Identité entreprise (SIREN) ---
 
-def _normalize_establishment_state(etab):
-    """Retourne uniquement A/F lorsque l'état de l'établissement est explicite."""
-    if not isinstance(etab, dict):
-        return None
-    state = etab.get("etat_administratif")
-    if isinstance(state, dict):
-        state = state.get("value") or state.get("code")
-    state = str(state or "").strip().upper()
-    return state if state in {"A", "F"} else None
+def _normalize_admin_state(value):
+    """Retourne A/F lorsque l'état administratif de l'unité légale est explicite."""
+    if isinstance(value, dict):
+        value = value.get("value") or value.get("code")
+    value = str(value or "").strip().upper()
+    return value if value in {"A", "F"} else None
 
 
-def _extract_establishment_matches(item, siret):
-    """
-    Retourne l'établissement correspondant au SIRET exact.
-
-    Priorité volontaire au siège lorsque son SIRET est exactement celui demandé :
-    le champ ``siege`` représente l'établissement de référence de l'unité légale.
-    On ne mélange jamais son état avec celui de l'unité légale.
-    """
-    siret = str(siret)
+def _active_establishment_count(item):
+    """Compte les établissements explicitement actifs lorsqu'ils sont présents dans la réponse."""
+    entries = []
     siege = item.get("siege") or {}
-    if str(siege.get("siret", "")) == siret:
-        return [siege]
+    if siege:
+        entries.append(siege)
+    entries.extend(item.get("matching_etablissements") or [])
+    seen = set()
+    count = 0
+    for etab in entries:
+        siret = str(etab.get("siret") or "")
+        key = siret or id(etab)
+        if key in seen:
+            continue
+        seen.add(key)
+        if _normalize_admin_state(etab.get("etat_administratif")) == "A":
+            count += 1
+    return count
 
-    matches = []
-    for etab in item.get("matching_etablissements") or []:
-        if str(etab.get("siret", "")) == siret:
-            matches.append(etab)
-    return matches
 
-
-def identity(siret):
-    """Vérifie l'unité légale et, séparément, le SIRET demandé."""
+def identity(siren):
+    """Vérifie l'unité légale à partir du SIREN. Aucun SIRET n'est requis par BifProtect."""
+    siren = re.sub(r"\D", "", str(siren or ""))
+    if not re.fullmatch(r"\d{9}", siren):
+        return {"found": False, "siren": siren, "source": "Recherche d'entreprises", "error": "SIREN invalide."}
     try:
-        data = fetch_json(SEARCH_API + quote(siret))
+        data = fetch_json(SEARCH_API + quote(siren))
         results = data.get("results") or []
-        if not results:
-            return {"found": False, "siret": siret, "source": "Recherche d'entreprises"}
-
-        # Recherche directe par SIRET. On ne fait pas confiance au seul premier résultat :
-        # on vérifie explicitement que le SIRET apparaît dans les données retournées.
         chosen = None
-        exact_estab = None
         for item in results:
-            matches = _extract_establishment_matches(item, siret)
-            if matches:
+            if str(item.get("siren") or "") == siren:
                 chosen = item
-                exact_estab = matches[0]
                 break
-            if str((item.get("siege") or {}).get("siret", "")) == siret:
-                chosen = item
-                exact_estab = item.get("siege")
-                break
-
-        # Si la recherche directe ne fournit pas l'établissement, on fait une recherche
-        # classique sur le nom de l'entreprise et vérifie matching_etablissements.
-        if chosen is None:
-            item0 = results[0]
-            nom = item0.get("nom_complet") or item0.get("nom_raison_sociale") or ""
-            if nom:
-                data2 = fetch_json(SEARCH_API + quote(nom))
-                for item in data2.get("results") or []:
-                    matches = _extract_establishment_matches(item, siret)
-                    if matches:
-                        chosen = item
-                        exact_estab = matches[0]
-                        break
+        if chosen is None and results:
+            chosen = results[0]
 
         if chosen is None:
-            # L'unité légale peut être retrouvée mais le SIRET précis n'a pas été confirmé.
-            item = results[0]
-            return {
-                "found": True,
-                "siret": siret,
-                "siren": item.get("siren") or siret[:9],
-                "nom": item.get("nom_complet") or item.get("nom_raison_sociale") or "",
-                "etat": item.get("etat_administratif") or "",
-                "date_fermeture": item.get("date_fermeture"),
-                "establishment_match": False,
-                "establishment_state": None,
-                "source": "Recherche d'entreprises",
-            }
+            return {"found": False, "siren": siren, "source": "Recherche d'entreprises"}
 
-        etat = chosen.get("etat_administratif") or ""
-        # IMPORTANT : l'état de l'unité légale (A/F) n'est pas l'état de
-        # l'établissement. Pour le SIRET exact, seule la donnée de
-        # l'établissement correspondant est utilisée. Une donnée absente
-        # reste inconnue et ne doit jamais être transformée en "Fermé".
-        estab_state = _normalize_establishment_state(exact_estab)
+        state = _normalize_admin_state(chosen.get("etat_administratif"))
+        siege = chosen.get("siege") or {}
+        siege_state = _normalize_admin_state(siege.get("etat_administratif"))
         return {
             "found": True,
-            "siret": siret,
-            "siren": chosen.get("siren") or siret[:9],
+            "siren": siren,
             "nom": chosen.get("nom_complet") or chosen.get("nom_raison_sociale") or "",
-            "etat": etat,
+            "etat": state,
             "date_fermeture": chosen.get("date_fermeture"),
-            "establishment_match": True,
-            "establishment_state": estab_state,
-            "establishment": exact_estab or {},
+            "siege_siret": siege.get("siret") or "",
+            "siege_state": siege_state,
+            "active_establishments": _active_establishment_count(chosen),
             "source": "Recherche d'entreprises",
         }
     except Exception as exc:
-        return {"found": False, "siret": siret, "source": "Recherche d'entreprises", "error": str(exc)}
+        return {"found": False, "siren": siren, "source": "Recherche d'entreprises", "error": str(exc)}
 
 
 # --- BODACC : procédures collectives / radiations publiées ---
@@ -332,7 +292,7 @@ class TextExtractor(HTMLParser):
                 self.title += " " + text
 
 
-def _contains_registration(raw, siren, siret):
+def _contains_registration(raw, siren):
     """Détecte un SIREN/SIRET dans HTML, texte brut ou PDF.
 
     Les mentions légales de certains sites sont servies uniquement en PDF.
@@ -354,13 +314,6 @@ def _contains_registration(raw, siren, siret):
             text = blob.decode("latin-1", errors="ignore")
     else:
         text = str(raw)
-    if siret:
-        compact = re.sub(r"\D", "", text)
-        if siret in compact:
-            return f"SIRET {siret}"
-        pat = r"\b" + r"\D*".join(map(re.escape, [siret[i:i+3] for i in range(0, 14, 3)])) + r"\b"
-        if re.search(pat, text):
-            return f"SIRET {siret}"
     if siren:
         compact = re.sub(r"\D", "", text)
         if siren in compact:
@@ -371,7 +324,7 @@ def _contains_registration(raw, siren, siret):
     return None
 
 
-def extract_site_evidence(url, siren, siret, company_name):
+def extract_site_evidence(url, siren, company_name):
     """Évalue le lien domaine ↔ entreprise, en recherchant aussi les pages légales découvertes dans le site."""
     result = {
         "status": "UNKNOWN",
@@ -422,7 +375,7 @@ def extract_site_evidence(url, siren, siret, company_name):
                     content_type = (response.headers.get("Content-Type") or "").lower()
                     raw = response.read(900_000)
                     result["pages_checked"].append(final_url)
-                    proof = _contains_registration(raw, siren, siret)
+                    proof = _contains_registration(raw, siren)
                     if proof:
                         result["direct_proof"] = True
                         result["score"] = 100
@@ -451,7 +404,7 @@ def extract_site_evidence(url, siren, siret, company_name):
                     final_url = response.geturl()
                     raw = response.read(900_000)
                     result["pages_checked"].append(final_url)
-                    proof = _contains_registration(raw, siren, siret)
+                    proof = _contains_registration(raw, siren)
                     if proof:
                         result["direct_proof"] = True
                         result["score"] = 100
@@ -559,24 +512,15 @@ def calculate_score(company, legal, domain_link, dns, http, tls):
     blockers = []
     complementary = []
 
-    # Garde-fous juridiques : chaque condition est évaluée indépendamment.
-    # Une absence de confirmation du SIRET ne doit jamais masquer une cessation
-    # de l'unité légale, et une donnée d'établissement inconnue ne doit jamais
-    # être interprétée comme "fermé".
+    # Garde-fou juridique principal : BifProtect identifie désormais l'entreprise par SIREN.
+    # Aucun établissement précis n'est imposé à la souscription.
     if not company.get("found"):
         score -= 20
-        blockers.append("SIRET non retrouvé dans la source publique interrogée.")
-    else:
-        if company.get("etat") == "F":
-            blockers.append("L'entreprise est déclarée cessée.")
-
-        if not company.get("establishment_match"):
-            complementary.append("Le SIRET précis n'a pas pu être confirmé automatiquement.")
-        else:
-            if company.get("establishment_state") == "F":
-                blockers.append("L'établissement correspondant au SIRET est fermé.")
-            elif company.get("establishment_state") not in {"A", "F"}:
-                complementary.append("L'état administratif de l'établissement n'a pas pu être confirmé automatiquement.")
+        blockers.append("SIREN non retrouvé dans la source publique interrogée.")
+    elif company.get("etat") == "F":
+        blockers.append("L'entreprise est déclarée cessée.")
+    elif company.get("etat") not in {"A", "F"}:
+        complementary.append("L'état administratif de l'entreprise n'a pas pu être confirmé automatiquement.")
 
     if legal.get("available"):
         if legal.get("radiation"):
@@ -591,7 +535,7 @@ def calculate_score(company, legal, domain_link, dns, http, tls):
         complementary.append("Le contrôle BODACC n'a pas pu être réalisé automatiquement.")
 
     if domain_link.get("status") != "VERIFIED":
-        complementary.append("Le lien entre le domaine et le SIRET n'est pas établi par une preuve juridique directe : justificatif requis avant validation définitive.")
+        complementary.append("Le lien entre le domaine et le SIREN n'est pas établi par une preuve juridique directe : justificatif requis avant validation définitive.")
 
     if not dns.get("ipv4"):
         score -= 20
@@ -644,7 +588,7 @@ def calculate_score(company, legal, domain_link, dns, http, tls):
         "blockers": blockers,
         "complementary": complementary,
         "reasons": reasons,
-        "version_bareme": "2.6",
+        "version_bareme": "2.8",
     }
 
 
@@ -659,7 +603,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/health":
-            self.send_json({"status": "ok", "version": "2.6"})
+            self.send_json({"status": "ok", "version": "2.8"})
             return
         if self.path in ("/", "/index.html"):
             body = (Path("static") / "index.html").read_bytes()
@@ -678,20 +622,20 @@ class Handler(BaseHTTPRequestHandler):
         try:
             length = int(self.headers.get("Content-Length", "0"))
             payload = json.loads(self.rfile.read(length))
-            siret = str(payload.get("siret", "")).strip()
+            siren = str(payload.get("siren", "")).strip()
             site = str(payload.get("site", "")).strip()
-            if not re.fullmatch(r"\d{14}", siret):
-                self.send_json({"detail": "SIRET invalide : 14 chiffres attendus."}, 400)
+            if not re.fullmatch(r"\d{9}", siren):
+                self.send_json({"detail": "SIREN invalide : 9 chiffres attendus."}, 400)
                 return
             parsed = validate_site_url(site)
             hostname = parsed.hostname
 
-            company = identity(siret)
-            legal = legal_status(company.get("siren") or siret[:9]) if company.get("found") else legal_status(siret[:9])
+            company = identity(siren)
+            legal = legal_status(company.get("siren") or siren)
             dns = dns_probe(hostname)
             http = http_probe(site)
             tls = tls_probe(hostname)
-            domain_link = extract_site_evidence(site, company.get("siren") or siret[:9], siret, company.get("nom", ""))
+            domain_link = extract_site_evidence(site, company.get("siren") or siren, company.get("nom", ""))
             decision = calculate_score(company, legal, domain_link, dns, http, tls)
 
             self.send_json({
@@ -709,5 +653,5 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    print(f"BifProtect Testeur V2.6 — écoute sur {HOST}:{PORT}")
+    print(f"BifProtect Testeur V2.8 — écoute sur {HOST}:{PORT}")
     ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()
