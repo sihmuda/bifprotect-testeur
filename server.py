@@ -692,6 +692,7 @@ def calculate_score(company, legal, domain_link, dns, http, tls):
     reasons = []
     blockers = []
     complementary = []
+    technical_complementary = []
 
     if not company.get("found"):
         blockers.append("SIREN non retrouvé dans la source publique interrogée.")
@@ -742,9 +743,9 @@ def calculate_score(company, legal, domain_link, dns, http, tls):
                 score -= penalty
                 reasons.append(reason)
     elif access_blocked:
-        complementary.append("L'accès automatisé au site est protégé ; les en-têtes HTTP n'ont pas pu être mesurés depuis notre point de contrôle.")
+        technical_complementary.append("L'accès automatisé au site est protégé ; les en-têtes HTTP n'ont pas pu être mesurés depuis notre point de contrôle.")
     else:
-        complementary.append("Les contrôles HTTP n'ont pas pu être mesurés.")
+        technical_complementary.append("Les contrôles HTTP n'ont pas pu être mesurés.")
 
     technical_score_available = not access_blocked
     score = max(0, min(100, score)) if technical_score_available else None
@@ -783,13 +784,14 @@ def calculate_score(company, legal, domain_link, dns, http, tls):
         "justificatif_required": bool(complementary) and not bool(blockers),
         "blockers": blockers,
         "complementary": complementary,
+        "technical_complementary": technical_complementary,
         "reasons": reasons,
         "technical_issue_count": technical_issue_count,
         "technical_unknown_count": technical_unknown_count,
         "automated_access_blocked": access_blocked,
         "technical_measurement": "PARTIAL" if access_blocked else ("MEASURED" if http_measured else "LIMITED"),
         "technical_score_available": technical_score_available,
-        "version_bareme": "3.3",
+        "version_bareme": "3.4",
     }
 
 
@@ -804,7 +806,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/health":
-            self.send_json({"status": "ok", "version": "3.3"})
+            self.send_json({"status": "ok", "version": "3.4"})
             return
         if self.path in ("/", "/index.html"):
             body = (Path("static") / "index.html").read_bytes()
@@ -858,5 +860,5 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    print(f"BifProtect Testeur V3.3 — écoute sur {HOST}:{PORT}")
+    print(f"BifProtect Testeur V3.4 — écoute sur {HOST}:{PORT}")
     ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()
