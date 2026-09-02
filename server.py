@@ -18,7 +18,7 @@ from urllib.parse import quote, urljoin, urlparse
 HOST = "0.0.0.0"
 PORT = int(os.environ.get("PORT", "10000"))
 TIMEOUT = 4
-USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36 BifProtect/3.7"
+USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36 BifProtect/3.10"
 
 SEARCH_API = "https://recherche-entreprises.api.gouv.fr/search?q="
 BODACC_API = "https://bodacc-datadila.opendatasoft.com/api/explore/v2.1/catalog/datasets/annonces-commerciales/records"
@@ -457,7 +457,11 @@ def extract_site_evidence(url, siren, company_name):
                         parser=TextExtractor(); parser.feed(raw.decode('utf-8',errors='ignore'))
                         page_text=" ".join(parser.parts)
                     if proof:
-                        if is_pdf or page_proves_base(page_text, final_url):
+                        # Le SIREN est l'identifiant légal de l'entreprise : s'il est
+                        # retrouvé sur une page du même domaine organisationnel, la preuve
+                        # est directe, y compris pour une page HTML qui ne répète pas son
+                        # propre domaine dans le texte.
+                        if same_organizational_domain(final_url, base_org):
                             result["direct_proof"]=True; result["score"]=100
                             result["evidence"].append(f"{proof} retrouvé sur {final_url}")
                             return True
@@ -770,7 +774,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/health":
-            self.send_json({"status": "ok", "version": "3.7"})
+            self.send_json({"status": "ok", "version": "3.10"})
             return
         if self.path in ("/", "/index.html"):
             body = (Path("static") / "index.html").read_bytes()
@@ -836,5 +840,5 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    print(f"BifProtect Testeur V3.7 — écoute sur {HOST}:{PORT}")
+    print(f"BifProtect Testeur V3.10 — écoute sur {HOST}:{PORT}")
     ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()
