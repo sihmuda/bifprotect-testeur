@@ -759,7 +759,7 @@ def calculate_score(company, legal, domain_link, dns, http, tls):
         "automated_access_blocked": access_blocked,
         "technical_measurement": "PARTIAL" if access_blocked else ("MEASURED" if http_measured else "LIMITED"),
         "technical_score_available": technical_score_available,
-        "version_bareme": "3.7",
+        "version_bareme": "3.10",
     }
 
 
