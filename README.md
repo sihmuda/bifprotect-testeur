@@ -1,48 +1,28 @@
-# BifProtect Testeur V3.1
+# BifProtect Testeur V3.2 — SIREN
 
-Prototype de qualification non intrusive d'un site marchand à partir d'un **SIREN** et d'une URL.
+## Objet
+Prototype de qualification d'une entreprise et de son site marchand à partir du **SIREN**.
 
-## Identifiant métier
+## Entrées
+- SIREN : 9 chiffres.
+- Site marchand : le champ est prérempli avec `https://www.`. L'utilisateur peut saisir le reste du domaine. Le backend accepte également un domaine saisi sans protocole et lui applique `https://www.`.
 
-BifProtect qualifie désormais l'**unité légale** identifiée par le SIREN. Aucun SIRET ni établissement précis n'est requis pour la décision d'éligibilité.
+## Rattachement domaine ↔ entreprise
+Le rattachement est **VÉRIFIÉ** dans deux cas principaux :
+1. le SIREN apparaît dans une preuve juridique publiée sur le domaine organisationnel contrôlé ;
+2. une page juridique du domaine identifie explicitement la raison sociale correspondant au SIREN comme exploitant, vendeur, éditeur, responsable du traitement ou propriétaire. Le SIREN n'a donc pas besoin d'être imprimé dans chaque CGV/mention légale.
 
-## Contrôles
+Les sous-domaines officiels sont acceptés uniquement lorsqu'ils appartiennent au même domaine organisationnel ; l'appartenance DNS seule ne constitue pas une preuve.
 
-1. Vérification de l'entreprise et de son état administratif via Recherche d'entreprises.
-2. Recherche BODACC/DILA des radiations et procédures collectives liées au SIREN.
-3. Vérification du rattachement **SIREN ↔ domaine**.
-4. Contrôles DNS, accessibilité HTTPS, TLS et en-têtes de sécurité.
-
-### Rattachement du domaine
-
-Le lien est **Vérifié** lorsqu'un SIREN est retrouvé comme preuve directe dans une page ou un document juridique accessible depuis le domaine contrôlé.
-
-La recherche couvre :
-- le domaine saisi et `www` ;
-- les sous-domaines du même domaine organisationnel ;
-- les pages de mentions légales, CGV, contact et pages institutionnelles ;
-- les PDF juridiques ;
-- les liens légaux/PDF découverts dans les pages ;
-- les URLs légales découvertes via `robots.txt` / sitemap.
-
-Un domaine tiers n'est jamais suivi comme preuve. Un sous-domaine ne devient une preuve que si le SIREN y est effectivement retrouvé.
-
-## Décisions
-
-- **NON ÉLIGIBLE** : condition juridique bloquante (entreprise cessée, radiation détectée, liquidation judiciaire en cours, etc.).
-- **ÉLIGIBLE SOUS RÉSERVE** : souscription possible, mais un justificatif reste nécessaire avant validation définitive.
-- **ÉLIGIBLE** : aucun blocage ni complément requis et score technique suffisant.
-
-Le score technique n'est pas une certification de sécurité.
+## Décision
+- Blocage juridique : `NON ÉLIGIBLE`.
+- Contrôle complémentaire : `ÉLIGIBLE SOUS RÉSERVE`, souscription possible mais validation définitive en attente du justificatif.
+- Aucun blocage ni complémentaire et score >= 80 : `ÉLIGIBLE`.
 
 ## Affichage
+Seuls les contrôles non conformes, inconnus ou complémentaires sont affichés. Les contrôles conformes restent pris en compte dans le calcul mais sont masqués.
 
-L'interface affiche le score et la décision, puis **uniquement les contrôles non conformes, à vérifier, complémentaires ou bloquants**. Les contrôles conformes sont masqués.
-
-## Sources publiques
-
-- Recherche d'entreprises : https://recherche-entreprises.api.gouv.fr/
-- BODACC / DILA : https://bodacc-datadila.opendatasoft.com/
-- RNE / INPI : https://data.inpi.fr/
-
-L'API RNE/INPI peut être intégrée ultérieurement avec les identifiants techniques INPI afin de renforcer le contrôle des observations, radiations et procédures collectives.
+## Déploiement Render
+- Build : `python -m compileall .`
+- Start : `python server.py`
+- Health : `/health`

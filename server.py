@@ -432,14 +432,44 @@ def extract_site_evidence(url, siren, company_name):
         def page_proves_base(text, final_url):
             if not text: return False
             compact=normalize_text(text)
-            # Même hôte : une preuve SIREN sur une page légale du domaine saisi est directe.
-            host=urlparse(final_url).hostname or ""
-            if host.lower().strip('.') == base_host:
+            host=(urlparse(final_url).hostname or "").lower().strip('.')
+            # Même hôte : une preuve SIREN sur une page juridique du domaine saisi est directe.
+            if host == base_host:
                 return True
-            # Sous-domaine : il faut une référence au domaine principal, à son www,
-            # ou un lien explicite vers celui-ci dans le contenu.
+            # Sous-domaine officiel : on demande une référence au domaine principal.
             tokens={base_org, "www."+base_org, base_host}
             return any(t in compact for t in tokens)
+
+        def page_proves_company_role(text, final_url):
+            """Preuve juridique par identification nominative de l'entreprise.
+
+            Le SIREN n'a pas besoin d'être imprimé dans le document : une page juridique
+            du domaine peut identifier explicitement l'entreprise comme exploitant, vendeur,
+            éditeur, responsable du traitement ou propriétaire. Le nom est ensuite rapproché
+            de l'unité légale déjà vérifiée par le SIREN.
+            """
+            if not text or not company_name:
+                return False
+            host=(urlparse(final_url).hostname or "").lower().strip('.')
+            if not same_organizational_domain(host, base_org):
+                return False
+            normalized_text=normalize_text(text)
+            company_tokens=name_tokens(company_name)
+            # On exige au moins deux tokens significatifs, sauf raison sociale courte.
+            if len(company_tokens) >= 2:
+                name_hit=sum(1 for t in company_tokens if t in normalized_text) >= 2
+            else:
+                name_hit=bool(company_tokens) and next(iter(company_tokens)) in normalized_text
+            if not name_hit:
+                return False
+            role_terms=(
+                "exploitant", "vendeur", "editeur", "éditeur", "responsable du traitement",
+                "proprietaire", "propriétaire", "societe", "société", "site marchand",
+                "conditions de vente", "conditions generales de vente", "conditions générales de vente",
+                "propriete intellectuelle", "propriété intellectuelle", "est et reste la propriete",
+                "est et reste la propriété", "agissant pour le compte de", "responsable de traitement"
+            )
+            return any(term in normalized_text for term in role_terms)
 
         def check_candidate(candidate):
             if candidate in seen or not allowed(candidate): return
@@ -452,16 +482,25 @@ def extract_site_evidence(url, siren, company_name):
                     raw=response.read(1_200_000)
                     result["pages_checked"].append(final_url)
                     proof=_contains_registration(raw,siren)
+                    page_text=""
+                    if not ctype.startswith("application/pdf") and not final_url.lower().split('?',1)[0].endswith('.pdf'):
+                        parser=TextExtractor(); parser.feed(raw.decode('utf-8',errors='ignore'))
+                        page_text=" ".join(parser.parts)
                     if proof:
                         if ctype.startswith("application/pdf") or final_url.lower().split('?',1)[0].endswith('.pdf'):
                             proof_ok=True
                         else:
-                            parser=TextExtractor(); parser.feed(raw.decode('utf-8',errors='ignore'))
-                            proof_ok=page_proves_base(" ".join(parser.parts), final_url)
+                            proof_ok=page_proves_base(page_text, final_url)
                         if proof_ok:
                             result["direct_proof"]=True; result["score"]=100
                             result["evidence"].append(f"{proof} retrouvé sur {final_url}")
                             return
+                    # Une preuve juridique nominative est suffisante même si le SIREN
+                    # n'apparaît pas dans le document : le SIREN a déjà identifié l'unité légale.
+                    if page_text and page_proves_company_role(page_text, final_url):
+                        result["direct_proof"]=True; result["score"]=100
+                        result["evidence"].append(f"Entreprise identifiée juridiquement sur {final_url}")
+                        return
                     if "html" in ctype or final_url.lower().split('?',1)[0].endswith(('.html','.htm','/')):
                         parse_html(raw,final_url)
             except Exception as exc:
@@ -686,7 +725,7 @@ def calculate_score(company, legal, domain_link, dns, http, tls):
         "blockers": blockers,
         "complementary": complementary,
         "reasons": reasons,
-        "version_bareme": "3.1",
+        "version_bareme": "3.2",
     }
 
 
@@ -701,7 +740,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/health":
-            self.send_json({"status": "ok", "version": "3.1"})
+            self.send_json({"status": "ok", "version": "3.2"})
             return
         if self.path in ("/", "/index.html"):
             body = (Path("static") / "index.html").read_bytes()
@@ -722,6 +761,10 @@ class Handler(BaseHTTPRequestHandler):
             payload = json.loads(self.rfile.read(length))
             siren = str(payload.get("siren", "")).strip()
             site = str(payload.get("site", "")).strip()
+            # L'interface préremplit https://www.; accepter aussi un simple domaine
+            # si l'utilisateur remplace entièrement le contenu du champ.
+            if site and not re.match(r"^https?://", site, re.I):
+                site = "https://www." + site.lstrip("/")
             if not re.fullmatch(r"\d{9}", siren):
                 self.send_json({"detail": "SIREN invalide : 9 chiffres attendus."}, 400)
                 return
@@ -751,5 +794,5 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    print(f"BifProtect Testeur V3.1 — écoute sur {HOST}:{PORT}")
+    print(f"BifProtect Testeur V3.2 — écoute sur {HOST}:{PORT}")
     ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()
