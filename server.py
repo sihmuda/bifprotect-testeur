@@ -7,6 +7,7 @@ import os
 import re
 import socket
 import ssl
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import urllib.error
 import urllib.request
 from html.parser import HTMLParser
@@ -16,8 +17,8 @@ from urllib.parse import quote, urljoin, urlparse
 
 HOST = "0.0.0.0"
 PORT = int(os.environ.get("PORT", "10000"))
-TIMEOUT = 10
-USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36 BifProtect/3.0"
+TIMEOUT = 5
+USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36 BifProtect/3.7"
 
 SEARCH_API = "https://recherche-entreprises.api.gouv.fr/search?q="
 BODACC_API = "https://bodacc-datadila.opendatasoft.com/api/explore/v2.1/catalog/datasets/annonces-commerciales/records"
@@ -509,44 +510,62 @@ def extract_site_evidence(url, siren, company_name):
                 # Les erreurs individuelles ne doivent pas faire échouer toute la qualification.
                 return
 
-        # 1) Hôte saisi + www : preuve directe prioritaire.
+        # 1) URLs prioritaires sur l'hôte saisi et www : exécution parallèle.
+        priority_candidates=[]
         for host in candidate_hosts[:2]:
             for path in ["", *direct_paths]:
                 candidate = f"https://{host}/" if not path else f"https://{host}/{path.lstrip('/') }"
-                check_candidate(candidate)
-                if result["direct_proof"]: break
-            if result["direct_proof"]: break
+                if candidate not in priority_candidates:
+                    priority_candidates.append(candidate)
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            futures=[pool.submit(check_candidate, c) for c in priority_candidates]
+            for future in as_completed(futures):
+                try: future.result()
+                except Exception: pass
 
-        # 2) Pages/sous-domaines juridiques de la même organisation.
+        # 2) Quelques sous-domaines juridiques évidents en second recours.
         if not result["direct_proof"]:
-            for host in candidate_hosts[2:]:
-                for path in direct_paths[:12]:
-                    check_candidate(f"https://{host}/{path}")
-                    if result["direct_proof"]: break
-                if result["direct_proof"]: break
+            fallback_candidates=[]
+            for host in candidate_hosts[2:6]:
+                for path in direct_paths[:8]:
+                    fallback_candidates.append(f"https://{host}/{path}")
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                futures=[pool.submit(check_candidate, c) for c in fallback_candidates]
+                for future in as_completed(futures):
+                    try: future.result()
+                    except Exception: pass
 
         # 3) Pages légales/PDF découvertes dans le HTML.
-        for candidate in discovered[:100]:
-            check_candidate(candidate)
-            if result["direct_proof"]: break
+        if not result["direct_proof"]:
+            candidates=list(dict.fromkeys(discovered[:50]))
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                futures=[pool.submit(check_candidate, c) for c in candidates]
+                for future in as_completed(futures):
+                    try: future.result()
+                    except Exception: pass
 
-        # 4) Sitemaps : uniquement pour découvrir des URLs juridiques du même domaine.
-        sitemap_urls=[f"https://{h}/sitemap.xml" for h in candidate_hosts[:3]]
-        for sm in sitemap_urls:
-            try:
-                if not allowed(sm): continue
-                with open_safe(sm,"GET") as response:
-                    raw=response.read(1_000_000); xml=raw.decode('utf-8',errors='ignore')
-                    for loc in re.findall(r"<loc>\s*(.*?)\s*</loc>",xml,flags=re.I|re.S):
-                        loc=html.unescape(loc.strip())
-                        if allowed(loc):
-                            low=loc.lower()
-                            if any(k in low for k in legal_terms) or low.endswith('.pdf'):
-                                add_candidate(loc,force=True)
-            except Exception: continue
-        for candidate in discovered[:100]:
-            check_candidate(candidate)
-            if result["direct_proof"]: break
+        # 4) Sitemap uniquement en dernier recours.
+        if not result["direct_proof"]:
+            sitemap_urls=[f"https://{h}/sitemap.xml" for h in candidate_hosts[:2]]
+            for sm in sitemap_urls:
+                try:
+                    if not allowed(sm): continue
+                    with open_safe(sm,"GET") as response:
+                        raw=response.read(1_000_000); xml=raw.decode('utf-8',errors='ignore')
+                        for loc in re.findall(r"<loc>\s*(.*?)\s*</loc>",xml,flags=re.I|re.S):
+                            loc=html.unescape(loc.strip())
+                            if allowed(loc):
+                                low=loc.lower()
+                                if any(k in low for k in legal_terms) or low.endswith('.pdf'):
+                                    add_candidate(loc,force=True)
+                except Exception: continue
+            if not result["direct_proof"]:
+                candidates=list(dict.fromkeys(discovered[:50]))
+                with ThreadPoolExecutor(max_workers=8) as pool:
+                    futures=[pool.submit(check_candidate, c) for c in candidates]
+                    for future in as_completed(futures):
+                        try: future.result()
+                        except Exception: pass
 
         corpus=normalize_text(" ".join(combined))
         domain_tokens=name_tokens(base_org.split('.')[0])
@@ -791,7 +810,7 @@ def calculate_score(company, legal, domain_link, dns, http, tls):
         "automated_access_blocked": access_blocked,
         "technical_measurement": "PARTIAL" if access_blocked else ("MEASURED" if http_measured else "LIMITED"),
         "technical_score_available": technical_score_available,
-        "version_bareme": "3.6",
+        "version_bareme": "3.7",
     }
 
 
@@ -806,7 +825,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/health":
-            self.send_json({"status": "ok", "version": "3.6"})
+            self.send_json({"status": "ok", "version": "3.7"})
             return
         if self.path in ("/", "/index.html"):
             body = (Path("static") / "index.html").read_bytes()
@@ -837,11 +856,23 @@ class Handler(BaseHTTPRequestHandler):
             parsed = validate_site_url(site)
             hostname = parsed.hostname
 
-            company = identity(siren)
-            legal = legal_status(company.get("siren") or siren)
-            dns = dns_probe(hostname)
-            http = http_probe(site)
-            tls = tls_probe(hostname)
+            # Les contrôles indépendants sont exécutés en parallèle afin de réduire
+            # fortement le temps d'attente sans supprimer de contrôles.
+            with ThreadPoolExecutor(max_workers=5) as pool:
+                futures = {
+                    "company": pool.submit(identity, siren),
+                    "legal": pool.submit(legal_status, siren),
+                    "dns": pool.submit(dns_probe, hostname),
+                    "http": pool.submit(http_probe, site),
+                    "tls": pool.submit(tls_probe, hostname),
+                }
+                results = {name: future.result() for name, future in futures.items()}
+
+            company = results["company"]
+            legal = results["legal"]
+            dns = results["dns"]
+            http = results["http"]
+            tls = results["tls"]
             domain_link = extract_site_evidence(site, company.get("siren") or siren, company.get("nom", ""))
             decision = calculate_score(company, legal, domain_link, dns, http, tls)
 
@@ -860,5 +891,5 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    print(f"BifProtect Testeur V3.6 — écoute sur {HOST}:{PORT}")
+    print(f"BifProtect Testeur V3.7 — écoute sur {HOST}:{PORT}")
     ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()

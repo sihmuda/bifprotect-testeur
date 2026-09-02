@@ -1,4 +1,4 @@
-# BifProtect Testeur V3.6 — SIREN
+# BifProtect Testeur V3.7 — SIREN
 
 ## Objet
 Prototype de qualification d'une entreprise et de son site marchand à partir du **SIREN**.
